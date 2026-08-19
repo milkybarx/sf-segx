@@ -25,10 +25,10 @@ One backbone/encoder per architecture family — no redundant variants of the sa
 
 | Model | Backbone | Params | Epochs | Best Val Dice | Best Val IoU | Notes |
 |---|---|---|---|---|---|---|
-| **Mask2Former** (from scratch) | custom FPN | 2.76M | 50 | **0.6990** | 0.5399 | See *leakage caveat* below |
+| **Mask2Former** | ResNet-34 (ImageNet), 768px | 22.6M | 50 | **0.7207** | 0.5708 | Best model overall. See *leakage caveat* below |
+| SegFormer | MiT-B2 (ImageNet), 640px | 27.3M | 36 | 0.6970 | — | See *SegFormer preprocessing* note below |
 | U-Net | ResNet-34 (ImageNet) | 24.4M | 15 | 0.6611 | 0.4945 | Clean file-level split |
 | DeepLabV3+ | ResNet-50 (ImageNet) | 26.7M | 35 | 0.6521 | 0.4844 | Clean file-level split |
-| SegFormer | MiT-B0 (ImageNet) | 3.7M | 50 | 0.6320 | — | See *SegFormer preprocessing* note below |
 | Attention U-Net | MONAI, from scratch | 7.9M | 20/25 | 0.6507 | 0.4829 | Run crashed epoch 22 on a transient file-read error (fixed); finalized from the epoch-20 checkpoint rather than re-run, since Dice had plateaued/was oscillating in 0.63-0.65 for ~10 epochs |
 
 All trained models are in `checkpoints/` and selectable live in the dashboard
@@ -38,9 +38,9 @@ SAM/MedSAM is still scoped for a future pass — not included yet (see below).
 ### A correction worth being upfront about
 
 The original codebase's README described the shipped `checkpoints/best_model.pth` as a
-"U-Net" achieving 0.699 Dice. **It is actually a Mask2Former** (`models/mask2former.py`,
-2.76M params) — confirmed by loading it and inspecting `checkpoint['config']['model']['name']`,
-not by re-reading prose. Renamed to `checkpoints/mask2former_best.pth` here.
+"U-Net" achieving 0.699 Dice. **It was actually a Mask2Former** (`models/mask2former.py`,
+2.76M params, from-scratch FPN pixel decoder) — confirmed by loading it and inspecting
+`checkpoint['config']['model']['name']`, not by re-reading prose.
 
 Separately, that same run's validation split (`preprocessing/dataset.py`) split by raw COCO
 `image_id`, but **707 physical images have 1,154 `image_id` entries** (up to 3 separate
@@ -49,10 +49,22 @@ let **121 of 296 duplicate-session images leak across train/val** — the model 
 given photo in training and be "validated" on the same photo with a different session's
 mask. This has been fixed (`create_data_splits` now splits by unique `file_name` first,
 then assigns all of a file's sessions to one side) — verified zero file overlap after the
-fix. The shipped 0.6990 Dice is from *before* this fix and is likely a bit optimistic; a
-clean re-run would be needed for an apples-to-apples number. This repo's other models
-(trained via `train_smp.py`) always used a clean file-level 85/15 split with single-session
-(not unioned) ground-truth masks — see the next section.
+fix. This repo's `train_smp.py`-trained models always used a clean file-level 85/15 split
+with single-session (not unioned) ground-truth masks — see the next section.
+
+**That original 0.6990-Dice checkpoint has since been superseded and removed from the repo.**
+The current `checkpoints/mask2former_phase3_768_best.pth` is a *different, later* training
+run — a Mask2Former with a real `torchvision.models.resnet34` pixel-decoder backbone
+(pretrained on ImageNet) instead of the from-scratch FPN, trained at 768px instead of 512px,
+reaching 0.7207 Dice at epoch 50. It arrived as a bare `state_dict` with no accompanying
+code, so its architecture (`models/mask2former.py`'s `ResNetPixelDecoder`) was reconstructed
+entirely from the checkpoint's own key names and tensor shapes and validated by a strict
+`load_state_dict()` (zero missing, zero unexpected keys) plus real Dice scores on held-out
+ground truth matching the checkpoint's own claimed number. Its own saved config records
+`train_ratio: 0.8, val_ratio: 0.2, seed: 42`, but which split *methodology* (leakage-prone
+by-`image_id`, or the fixed by-`file_name`) produced that split was not independently
+re-verified — treat 0.7207 with the same "possibly optimistic" caution as the original run
+until re-confirmed.
 
 ### A second, similar data-quality fix
 
@@ -64,17 +76,22 @@ Fixed to use one canonical session per file instead.
 
 ### SegFormer preprocessing — a silent-failure trap
 
-`checkpoints/segformer_b0_best.pt` (HuggingFace `SegformerForSemanticSegmentation`, MiT-B0)
-was trained on **plain-resized RGB images with ImageNet normalization — no CLAHE, no
-limb-darkening correction, no disk detection**, unlike every other model in this repo.
-Feeding it this repo's `GONGPreprocessor` output instead (the "obviously more sophisticated"
-choice) doesn't error — it just silently drops Dice from ~0.60 to ~0.22 on a held-out
-sample, i.e. a wrong-but-plausible-looking model. Confirmed by testing both pipelines
-against real ground truth before wiring it into `model_hub.py`. The lesson generalizes:
-*a model loading successfully proves the architecture matches, not that the preprocessing
-does* — every external checkpoint in this repo (`checkpoints/*.pth`/`*.pt` not produced by
-`train_smp.py`) needed its exact training-time preprocessing reverse-engineered and
-verified against ground truth before being trusted, not assumed from what "should" work.
+`checkpoints/segformer_b2_best.pt` (HuggingFace `SegformerForSemanticSegmentation`, MiT-B2,
+640px, 2-class head) was trained on **plain-resized RGB images with ImageNet normalization —
+no CLAHE, no limb-darkening correction, no disk detection**, unlike every other model in
+this repo. Feeding it this repo's `GONGPreprocessor` output instead (the "obviously more
+sophisticated" choice) doesn't error — it just measurably drops Dice on a held-out sample,
+i.e. a wrong-but-plausible-looking model. It also arrived as a bare `state_dict` with a
+2-channel classifier output and no indication of which channel is foreground or whether to
+read it via softmax or independent sigmoid; a threshold/channel sweep against real ground
+truth showed **channel 0 scores near-zero Dice (background) and channel 1 matches the
+checkpoint's reported val_dice (filament)** — sigmoid on channel 1, not softmax. Both facts
+were confirmed by testing against real ground truth before wiring it into `model_hub.py`,
+not assumed. The lesson generalizes: *a model loading successfully proves the architecture
+matches, not that the preprocessing or output convention does* — every external checkpoint
+in this repo (`checkpoints/*.pth`/`*.pt` not produced by `train_smp.py`) needed its exact
+training-time preprocessing and output convention reverse-engineered and verified against
+ground truth before being trusted, not assumed from what "should" work.
 
 ### MedSAM — attempted, not included
 
@@ -95,7 +112,8 @@ work.
 ├── model_hub.py                 # shared model registry + checkpoint loading + inference,
 │                                 #   the single source of truth streamlit_app.py runs on
 ├── configs/
-│   └── default_config.yaml      # hyperparameters for training/train.py
+│   ├── default_config.yaml      # hyperparameters for training/train.py
+│   └── segformer_mitb2_config.json  # local SegFormer MiT-B2 architecture snapshot (offline-safe)
 ├── data/                        # MAGFiLO dataset (download separately, see Setup)
 │   └── MAGFiLO_1.0_Kaggle_2026/
 │       ├── train/{train_images, train_masks, train_preprocessed}/
@@ -129,15 +147,13 @@ work.
 │   └── viz.py
 ├── inference/
 │   └── predict.py               # SolarFilamentPredictor: unet/frangi/hybrid inference
-├── checkpoints/                  (tracked in git -- see "Checkpoints ship in the repo")
-│   ├── mask2former_best.pth     # 0.6990 Dice (pre-leakage-fix, see caveat above)
+├── checkpoints/                  (tracked in git via Git LFS -- see "Checkpoints ship in the repo")
+│   ├── mask2former_phase3_768_best.pth  # 0.7207 Dice, best model (fp16 on disk, ~45MB)
+│   ├── segformer_b2_best.pt     # 0.6970 Dice (fp16 on disk, ~55MB, see preprocessing caveat above)
 │   ├── unet_resnet34_best.pth   # 0.6611 Dice (fp16 on disk, ~46MB)
 │   ├── deeplabv3plus_resnet50_best.pth  # 0.6521 Dice (fp16 on disk, ~51MB)
-│   ├── segformer_b0_best.pt     # 0.6320 Dice (see SegFormer preprocessing caveat above)
 │   └── attention_unet_best.pth  # 0.6507 Dice (epoch 20/25, see caveat above)
 ├── experiments/
-│   ├── mask2former_training_results.json  # full 50-epoch history for that checkpoint
-│   ├── segformer_training_history.csv     # full 50-epoch history for that checkpoint
 │   ├── evaluate.py, generate_report.py, plot_results.py
 ├── outputs/
 │   ├── logs/                    # train_smp.py per-architecture training logs
@@ -149,8 +165,11 @@ work.
 │   │                              #   evaluation -> post-processing (instance separation,
 │   │                              #   skeleton/sinuosity/tilt measurements, Grad-CAM,
 │   │                              #   JSON/CSV catalog export, space-weather risk rating)
-│   ├── reference_segformer_01_data_prep.ipynb  # how segformer_b0_best.pt's data was prepped
-│   └── reference_segformer_02_training.ipynb   # how segformer_b0_best.pt was trained
+│   ├── reference_segformer_01_data_prep.ipynb  # data prep for the earlier MiT-B0 SegFormer run
+│   └── reference_segformer_02_training.ipynb   # training for the earlier MiT-B0 SegFormer run
+│                                    #   (superseded by segformer_b2_best.pt, no equivalent
+│                                    #   notebook exists for the MiT-B2/Mask2Former-phase3
+│                                    #   checkpoints -- they arrived pre-trained, see caveats above)
 ├── docs/
 │   ├── Solar_Filament_Complete_Guide_Zero_To_Hundred.pdf
 │   └── Solar_Filament_Technical_Audit.pdf
@@ -183,16 +202,23 @@ python scripts/prepare_cache.py   # precompute preprocessing cache (~3min, speed
 
 ### Checkpoints ship in the repo
 
-All 5 trained checkpoints are tracked directly in `checkpoints/` — no Git LFS, no external
-download step. Two of them (`unet_resnet34_best.pth`, `deeplabv3plus_resnet50_best.pth`)
-were re-saved with float16 weights specifically to clear GitHub's 100MB single-file limit
-(107MB → 51MB and 93MB → 46MB); `model_hub.get_model()` transparently upcasts them back to
-float32 on load, so inference precision is unaffected either way. Retraining any of them is
+All 5 trained checkpoints are tracked in `checkpoints/` via **Git LFS** — `git lfs install`
+once, then a normal `git clone`/`pull` transparently fetches the real weights instead of
+pointer files (GitHub's `git clone` UI and `git lfs env` both confirm this without any extra
+flags). Every checkpoint is stored with float16 weights and stripped of optimizer/scheduler
+state (inference-only) to stay small: `unet_resnet34_best.pth` and
+`deeplabv3plus_resnet50_best.pth` were re-saved this way specifically to clear GitHub's
+100MB single-file limit (107MB → 51MB and 93MB → 46MB), and the same fp16-on-disk approach
+was used for the two newest checkpoints (`mask2former_phase3_768_best.pth` ~45MB,
+`segformer_b2_best.pt` ~55MB) to conserve GitHub LFS's free-tier bandwidth quota.
+`model_hub.get_model()` transparently upcasts fp16 weights back to float32 on load, so
+inference precision is unaffected either way. Retraining the `train_smp.py`-based models is
 still just `python train_smp.py --arch <name>` (a few minutes to ~1.5 hours each on an
-RTX-3050-class GPU) if you want to regenerate from scratch. **Without checkpoints present**
-(e.g. if you delete `checkpoints/`), the dashboard still runs — it shows training
-history/status for every architecture and labels image/video evaluation as unavailable
-rather than crashing.
+RTX-3050-class GPU) if you want to regenerate from scratch; the Mask2Former-phase3 and
+SegFormer-B2 checkpoints arrived pre-trained (see caveats above) and have no equivalent
+one-command retrain path in this repo. **Without checkpoints present** (e.g. if you delete
+`checkpoints/`), the dashboard still runs — it shows training history/status for every
+architecture and labels image/video evaluation as unavailable rather than crashing.
 
 ## Training
 
@@ -211,8 +237,10 @@ python train_smp.py --arch attention_unet --epochs 25
 python training/train.py configs/default_config.yaml
 ```
 
-SegFormer was trained via `notebooks/reference_segformer_02_training.ipynb` (HuggingFace
-`transformers`, not `train_smp.py` — see its own preprocessing caveat above).
+The earlier MiT-B0 SegFormer run was trained via `notebooks/reference_segformer_02_training.ipynb`
+(HuggingFace `transformers`, not `train_smp.py`). The current `segformer_b2_best.pt` and
+`mask2former_phase3_768_best.pth` checkpoints arrived pre-trained with no accompanying
+training code — see their preprocessing/architecture caveats above.
 
 Both trainers write checkpoints to `checkpoints/` and print per-epoch Dice/IoU/loss.
 
@@ -232,10 +260,12 @@ streamlit run streamlit_app.py
 ### Deploy to Streamlit Community Cloud
 
 1. Push this repo to GitHub (`.gitignore` excludes only `data/` — the 3GB Kaggle dataset,
-   not needed at inference time — everything else, checkpoints included, is tracked).
+   not needed at inference time — everything else, checkpoints included, is tracked, with
+   `checkpoints/*.pth`/`*.pt` served via Git LFS — see `.gitattributes`).
 2. On [share.streamlit.io](https://share.streamlit.io), point a new app at the repo with
    main file path `streamlit_app.py`. No secrets/config needed — `requirements.txt` and
-   `.streamlit/config.toml` are picked up automatically.
+   `.streamlit/config.toml` are picked up automatically; Streamlit Community Cloud resolves
+   Git LFS pointers on its own during the build.
 3. That's it — all 5 trained models are in the repo, so the deployed app is fully live
    (Overview/Gallery/Upload Image/Upload Video all work) with no extra setup.
 
@@ -246,12 +276,13 @@ conversion, solar-disk detection (contour + `minEnclosingCircle`, shrunk 7% to d
 limb edge artifact ring), limb-darkening correction, CLAHE contrast enhancement,
 multi-scale Black Top-Hat + Frangi vesselness ridge filtering.
 
-**Deep learning**: interchangeable architectures — from-scratch U-Net and a lightweight
-Mask2Former (`models/`), ImageNet-pretrained U-Net/DeepLabV3+/Attention-U-Net
-(`train_smp.py`, via `segmentation-models-pytorch`/MONAI), and a HuggingFace SegFormer
-(MiT-B0). Trained with a compound Dice+Focal/BCE loss under severe class imbalance
-(filaments cover <2% of the disk), AMP mixed precision, and (in `training/train.py`)
-cosine LR annealing + early stopping.
+**Deep learning**: interchangeable architectures — a lightweight Mask2Former (`models/`,
+with either a from-scratch FPN or a `torchvision` ResNet-34 pixel-decoder backbone),
+from-scratch U-Net, ImageNet-pretrained U-Net/DeepLabV3+/Attention-U-Net (`train_smp.py`,
+via `segmentation-models-pytorch`/MONAI), and a HuggingFace SegFormer (MiT-B2). Trained with
+a compound Dice+Focal/BCE loss under severe class imbalance (filaments cover <2% of the
+disk), AMP mixed precision, and (in `training/train.py`) cosine LR annealing + early
+stopping.
 
 **Hybrid fusion** (`hybrid/fusion.py`): `P_final = alpha * P_DeepLearning + (1-alpha) * P_Frangi`,
 with an alpha sweep to find the best blend on the validation set; also supports strict
@@ -271,10 +302,11 @@ Frangi, or hybrid prediction on a single image and returns every intermediate
 
 ## Known limitations
 
-- The shipped Mask2Former checkpoint's 0.6990 Dice was measured under a validation split
-  with train/val leakage (see above) — treat it as an upper-bound estimate, not a clean
-  benchmark. The split code is now fixed for future runs; re-training was out of scope
-  for this pass given time constraints (the original run took ~96 minutes).
+- The current Mask2Former checkpoint's 0.7207 Dice has an unverified split methodology (see
+  *A correction worth being upfront about* above) — the split code in this repo is fixed for
+  future from-scratch runs, but this particular checkpoint arrived pre-trained, so whether it
+  used the leakage-prone or fixed split can't be confirmed from the checkpoint alone; treat
+  0.7207 as a possible upper-bound estimate, not a guaranteed clean benchmark.
 - DeepLabV3+ initially targeted an EfficientNet-B4 encoder; switched to ResNet-50 after
   measuring EfficientNet-B4 at ~7-12x slower per batch on this GPU/driver/cuDNN combo (and
   hitting a CUDA OOM at batch size 8 before AMP was added). Only the ResNet-50 variant is

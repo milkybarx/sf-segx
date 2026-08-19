@@ -107,6 +107,81 @@ class MultiScalePixelDecoder(nn.Module):
         return [p3, p4, p5], mask_feat
 
 
+class ResNetPixelDecoder(nn.Module):
+    """
+    Feature Pyramid Pixel Decoder built on a real torchvision ResNet-34 backbone (in place
+    of MultiScalePixelDecoder's from-scratch conv_c1-c5 stack), used by the "phase3" 768-res
+    checkpoint (config: model.backbone="resnet34", model.pretrained=true). Submodule names
+    (conv1/bn1/layer1-4) are assigned directly from torchvision's ResNet so the state_dict
+    keys match torchvision's own convention exactly -- required for the trained checkpoint's
+    weights to load, not just architectural taste.
+    """
+    def __init__(self, in_channels: int = 1, hidden_dim: int = 128, pretrained: bool = False):
+        super().__init__()
+        import torchvision
+
+        resnet = torchvision.models.resnet34(
+            weights=torchvision.models.ResNet34_Weights.IMAGENET1K_V1 if pretrained else None
+        )
+        # Adapt the stem for single-channel (grayscale) input instead of RGB.
+        resnet.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
+
+        self.conv1 = resnet.conv1
+        self.bn1 = resnet.bn1
+        self.relu = resnet.relu
+        self.maxpool = resnet.maxpool
+        self.layer1 = resnet.layer1  # 1/4,  64ch
+        self.layer2 = resnet.layer2  # 1/8,  128ch
+        self.layer3 = resnet.layer3  # 1/16, 256ch
+        self.layer4 = resnet.layer4  # 1/32, 512ch
+
+        # Full-resolution stem (mirrors MultiScalePixelDecoder's conv_c1) purely for the
+        # finest-detail skip connection into mask_features -- the ResNet stem above already
+        # downsamples 4x before layer1, losing thin single-pixel filament threads otherwise.
+        self.stem_c1 = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.GELU(),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.GELU(),
+        )
+
+        self.lateral_c5 = nn.Conv2d(512, hidden_dim, 1)
+        self.lateral_c4 = nn.Conv2d(256, hidden_dim, 1)
+        self.lateral_c3 = nn.Conv2d(128, hidden_dim, 1)
+        self.lateral_c2 = nn.Conv2d(64, hidden_dim, 1)
+
+        self.mask_features = nn.Sequential(
+            nn.Conv2d(hidden_dim + 32, hidden_dim, kernel_size=3, padding=1),
+            nn.BatchNorm2d(hidden_dim),
+            nn.GELU(),
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, padding=1),
+            nn.BatchNorm2d(hidden_dim),
+            nn.GELU(),
+        )
+
+    def forward(self, x: torch.Tensor) -> Tuple[List[torch.Tensor], torch.Tensor]:
+        stem = self.stem_c1(x)  # [B, 32, H, W] full resolution
+
+        h = self.relu(self.bn1(self.conv1(x)))
+        h = self.maxpool(h)
+        c2 = self.layer1(h)   # 1/4
+        c3 = self.layer2(c2)  # 1/8
+        c4 = self.layer3(c3)  # 1/16
+        c5 = self.layer4(c4)  # 1/32
+
+        p5 = self.lateral_c5(c5)
+        p4 = self.lateral_c4(c4) + F.interpolate(p5, size=c4.shape[2:], mode='bilinear', align_corners=False)
+        p3 = self.lateral_c3(c3) + F.interpolate(p4, size=c3.shape[2:], mode='bilinear', align_corners=False)
+        p2 = self.lateral_c2(c2) + F.interpolate(p3, size=c2.shape[2:], mode='bilinear', align_corners=False)
+
+        p1 = F.interpolate(p2, size=stem.shape[2:], mode='bilinear', align_corners=False)
+        mask_feat = self.mask_features(torch.cat([p1, stem], dim=1))
+
+        return [p3, p4, p5], mask_feat
+
+
 class MaskedCrossAttention(nn.Module):
     """
     Masked Cross-Attention: restricts cross-attention strictly to the foreground
@@ -192,13 +267,18 @@ class Mask2Former(nn.Module):
         hidden_dim: int = 128,
         num_decoder_layers: int = 3,
         nheads: int = 8,
+        backbone: str = "scratch",  # "scratch" (from-scratch conv stack) or "resnet34"
+        pretrained: bool = False,
     ):
         super().__init__()
         self.num_queries = num_queries
         self.hidden_dim = hidden_dim
 
         # Pixel Decoder (Feature Pyramid)
-        self.pixel_decoder = MultiScalePixelDecoder(in_channels, hidden_dim)
+        if backbone == "resnet34":
+            self.pixel_decoder = ResNetPixelDecoder(in_channels, hidden_dim, pretrained=pretrained)
+        else:
+            self.pixel_decoder = MultiScalePixelDecoder(in_channels, hidden_dim)
 
         # Learnable Filament Query Embeddings
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
@@ -283,6 +363,11 @@ def build_mask2former(config: dict = None) -> Mask2Former:
         num_queries=config.get('num_queries', 20),
         hidden_dim=config.get('hidden_dim', 128),
         num_decoder_layers=config.get('num_decoder_layers', 3),
+        backbone=config.get('backbone', 'scratch'),
+        # Loading our own trained checkpoint immediately overwrites every weight anyway --
+        # pretrained=False here regardless of the checkpoint's own training-time config,
+        # so inference never depends on an ImageNet download.
+        pretrained=False,
     )
     total, trainable = model.count_parameters()
     print(f"Mask2Former Model: {total:,} total parameters ({trainable:,} trainable)")

@@ -112,14 +112,22 @@ if page == "Overview":
 
     status = cached_status(arch)
     epochs = status["epochs"]
+    final_metrics = status.get("final_metrics")
     best_dice = hub.best_dice_for(status)
     best_iou = max((e["val_iou"] for e in epochs), default=None)
+    if best_iou is None and final_metrics:
+        best_iou = final_metrics.get("val_iou")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Status", status["state"].replace("_", " ").title())
     c2.metric("Best Val Dice", f"{best_dice:.3f}" if best_dice else "—")
     c3.metric("Best Val IoU", f"{best_iou:.3f}" if best_iou else "—")
-    c4.metric("Epochs Logged", f"{len(epochs)}" + (f" / {epochs[-1]['total_epochs']}" if epochs else ""))
+    if epochs:
+        c4.metric("Epochs Logged", f"{len(epochs)} / {epochs[-1]['total_epochs']}")
+    elif final_metrics:
+        c4.metric("Best Epoch", f"{final_metrics.get('epoch', '?')} / {final_metrics.get('total_epochs', '?')}")
+    else:
+        c4.metric("Epochs Logged", "0")
     style_metric_cards(border_left_color=CRIMSON)
 
     if epochs:
@@ -147,6 +155,16 @@ if page == "Overview":
             margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h", y=1.1),
         )
         st.plotly_chart(fig2, width='stretch')
+    elif final_metrics:
+        st.info(
+            f"Only the final checkpoint's metrics were saved for this model "
+            f"(epoch {final_metrics.get('epoch', '?')}/{final_metrics.get('total_epochs', '?')}) "
+            "— no per-epoch history to chart."
+        )
+        mc1, mc2, mc3 = st.columns(3)
+        mc1.metric("Val Loss", f"{final_metrics['val_loss']:.3f}" if final_metrics.get("val_loss") is not None else "—")
+        mc2.metric("Val Precision", f"{final_metrics['val_precision']:.3f}" if final_metrics.get("val_precision") is not None else "—")
+        mc3.metric("Val Recall", f"{final_metrics['val_recall']:.3f}" if final_metrics.get("val_recall") is not None else "—")
     else:
         st.info("No training history yet for this model.")
 

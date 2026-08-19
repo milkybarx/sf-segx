@@ -7,15 +7,18 @@ Two families of models are exposed under one interface:
   - MODEL_REGISTRY (from train_smp.py): ImageNet-pretrained smp architectures
     (U-Net/DeepLabV3+/FPN/PSPNet/Attention-U-Net), trained + logged by this repo.
   - EXTERNAL_MODELS: models trained outside train_smp.py, each with its own "kind" (build
-    function + preprocessing pipeline) and a static history (JSON or CSV) instead of a
+    function + preprocessing pipeline) and a static history (JSON/CSV/scalar) instead of a
     live train_log*.txt:
-      - "mask2former": from-scratch Mask2Former (models/mask2former.py), trained with
-        preprocessing.solar_preprocessor.SolarPreprocessor ([0,1]-normalized grayscale).
-      - "segformer": HuggingFace SegformerForSemanticSegmentation (nvidia/mit-b0 config),
-        trained on plain-resized (no astronomical preprocessing) ImageNet-normalized RGB --
-        confirmed empirically: feeding it our CLAHE/limb-corrected GONGPreprocessor output
-        instead dropped Dice from ~0.60 to ~0.22 on a held-out sample, i.e. wrong
-        preprocessing silently produces a working-looking but badly wrong model.
+      - "mask2former": Mask2Former with a torchvision ResNet-34 pixel-decoder backbone
+        (models/mask2former.py), trained at 768px with preprocessing.solar_preprocessor.
+        SolarPreprocessor ([0,1]-normalized grayscale).
+      - "segformer": HuggingFace SegformerForSemanticSegmentation (nvidia/mit-b2 config,
+        2-class head), trained at 640px on plain-resized (no astronomical preprocessing)
+        ImageNet-normalized RGB -- confirmed empirically via threshold/channel sweeps against
+        real ground truth: channel 1 of the 2-class output is the filament logit (channel 0
+        scores near-zero Dice), and feeding CLAHE/limb-corrected GONGPreprocessor output
+        instead of a plain resize measurably hurts Dice, i.e. wrong preprocessing silently
+        produces a working-looking but badly wrong model.
 """
 import csv
 import glob
@@ -49,21 +52,38 @@ else:
     GALLERY_IMG_DIR, GALLERY_MASK_DIR = _BUNDLED_IMG_DIR, _BUNDLED_MASK_DIR
 
 EXTERNAL_MODELS = {
-    "mask2former_scratch": {
-        "label": "Mask2Former (from scratch)",
+    "mask2former_phase3": {
+        "label": "Mask2Former (ResNet-34 backbone, 768px)",
         "kind": "mask2former",
-        "checkpoint": os.path.join(ROOT, "checkpoints", "mask2former_best.pth"),
-        "results_json": os.path.join(ROOT, "experiments", "mask2former_training_results.json"),
+        "checkpoint": os.path.join(ROOT, "checkpoints", "mask2former_phase3_768_best.pth"),
+        # Native training/inference resolution -- resized up from the 512 used elsewhere
+        # in this dashboard, then back down to DISPLAY_SIZE for consistent UI display.
+        "resolution": 768,
+        "best_threshold": 0.5,
+        # No per-epoch history was kept for this checkpoint, only its final (best) epoch --
+        # shown as a metrics summary instead of a Dice-over-epochs chart.
+        "final_metrics": {
+            "epoch": 50, "total_epochs": 50,
+            "val_loss": 0.21066286736007395, "val_dice": 0.7206500790499407,
+            "val_iou": 0.5708135900183998, "val_precision": 0.7056684835717596,
+            "val_recall": 0.7571822695177177,
+        },
     },
-    "segformer_b0": {
-        "label": "SegFormer (MiT-B0)",
+    "segformer_b2": {
+        "label": "SegFormer (MiT-B2, 640px)",
         "kind": "segformer",
-        "checkpoint": os.path.join(ROOT, "checkpoints", "segformer_b0_best.pt"),
-        "history_csv": os.path.join(ROOT, "experiments", "segformer_training_history.csv"),
+        "checkpoint": os.path.join(ROOT, "checkpoints", "segformer_b2_best.pt"),
+        "config_path": os.path.join(ROOT, "configs", "segformer_mitb2_config.json"),
+        # 2-class classifier head (background, filament) -- channel 1 is the filament
+        # logit (confirmed empirically: channel 0 scores near-zero Dice against real
+        # ground truth, channel 1 matches the checkpoint's reported val_dice).
+        "num_labels": 2,
+        "resolution": 640,
         # Best threshold + Dice measured empirically on this repo's data/eval pipeline
-        # (the checkpoint's own val_dice=0.6320 @ epoch 24 was selected at threshold 0.5
-        # during its own training run; 0.55 scored higher in our own re-check).
-        "best_threshold": 0.55,
+        # (raw resize, no astronomical preprocessing, ImageNet-normalized RGB, sigmoid
+        # on the channel-1/filament logit -- see the "segformer" branch of run_inference).
+        "best_threshold": 0.5,
+        "final_metrics": {"epoch": 36, "total_epochs": 36, "val_dice": 0.6969595923322902},
     },
 }
 
@@ -128,15 +148,14 @@ def _build_mask2former_model(checkpoint: dict):
     return build_unet(saved_config.get("model", {}))
 
 
-def _build_segformer_model():
-    # Loads the MiT-B0 config from a local JSON snapshot (configs/segformer_mitb0_config.json)
-    # instead of SegformerConfig.from_pretrained("nvidia/mit-b0", ...), which hits HuggingFace
-    # Hub over the network every time -- pointless here since checkpoints/segformer_b0_best.pt
-    # already has every trained weight; the "pretrained" config is only used for its
-    # architecture shape, not any actual pretrained values.
+def _build_segformer_model(spec: dict):
+    # Loads the MiT-B2 config from a local JSON snapshot (configs/segformer_mitb2_config.json)
+    # instead of SegformerConfig.from_pretrained("nvidia/mit-b2", ...), which hits HuggingFace
+    # Hub over the network every time -- pointless here since the checkpoint already has every
+    # trained weight; the "pretrained" config is only used for its architecture shape (incl.
+    # the 2-class classifier head), not any actual pretrained values.
     from transformers import SegformerConfig, SegformerForSemanticSegmentation
-    config_path = os.path.join(ROOT, "configs", "segformer_mitb0_config.json")
-    config = SegformerConfig.from_json_file(config_path)
+    config = SegformerConfig.from_json_file(spec["config_path"])
     return SegformerForSemanticSegmentation(config)
 
 
@@ -154,7 +173,7 @@ def get_model(arch: str):
                 kind = EXTERNAL_MODELS[arch]["kind"]
                 checkpoint = torch.load(ckpt, map_location=device, weights_only=False)
                 if kind == "segformer":
-                    m = _build_segformer_model()
+                    m = _build_segformer_model(EXTERNAL_MODELS[arch])
                 else:
                     m = _build_mask2former_model(checkpoint)
                 m.load_state_dict(checkpoint["model_state_dict"])
@@ -231,11 +250,18 @@ def parse_external_status(arch: str):
         best_epoch_dice = max((e["val_dice"] for e in epochs), default=0.0)
         best_threshold = {"threshold": spec.get("best_threshold", 0.5), "dice": best_epoch_dice}
 
+    elif "final_metrics" in spec:
+        # No per-epoch history was kept for this checkpoint (only its final/best epoch) --
+        # no Dice-over-epochs chart to build, so just surface the scalar metrics directly.
+        fm = spec["final_metrics"]
+        best_threshold = {"threshold": spec.get("best_threshold", 0.5), "dice": fm.get("val_dice", 0.0)}
+
     return {
         "arch": arch, "label": spec["label"],
         "state": "complete" if os.path.exists(ckpt) else "not_started",
         "epochs": epochs, "current_progress": None, "thresholds": [],
         "best_threshold": best_threshold,
+        "final_metrics": spec.get("final_metrics"),
         "checkpoint_exists": os.path.exists(ckpt),
         "checkpoint_mtime": os.path.getmtime(ckpt) if os.path.exists(ckpt) else None,
     }
@@ -352,6 +378,8 @@ def run_inference(raw_img: np.ndarray, arch: str, best_thresh: float):
     model, _ = get_model(arch)
 
     if arch in EXTERNAL_MODELS and EXTERNAL_MODELS[arch]["kind"] == "segformer":
+        spec = EXTERNAL_MODELS[arch]
+        res = spec.get("resolution", DISPLAY_SIZE)
         # No astronomical preprocessing (see EXTERNAL_MODELS docstring) -- just resize.
         # disk_mask is still computed (geometry only, cheap) so predictions can be
         # clipped to the solar disk like every other model here.
@@ -363,17 +391,24 @@ def run_inference(raw_img: np.ndarray, arch: str, best_thresh: float):
             return small, disk_small, np.zeros((DISPLAY_SIZE, DISPLAY_SIZE), dtype=np.float32), \
                 np.zeros((DISPLAY_SIZE, DISPLAY_SIZE), dtype=np.uint8)
         with torch.no_grad():
-            img3 = cv2.cvtColor(small, cv2.COLOR_GRAY2RGB).astype(np.float32) / 255.0
+            # Resized directly from raw_img at the model's own trained resolution (not
+            # from the already-downsampled DISPLAY_SIZE "small") to match training-time input.
+            model_in = cv2.resize(raw_img, (res, res), interpolation=cv2.INTER_AREA)
+            img3 = cv2.cvtColor(model_in, cv2.COLOR_GRAY2RGB).astype(np.float32) / 255.0
             img3n = (img3 - IMAGENET_MEAN) / IMAGENET_STD
             inp = torch.from_numpy(img3n.transpose(2, 0, 1)).unsqueeze(0).float()
             logits = model(pixel_values=inp).logits
-            probs_small = torch.sigmoid(logits)
+            # 2-class head: channel 0 = background, channel 1 = filament (see EXTERNAL_MODELS).
+            fg_logits = logits[:, 1:2] if spec.get("num_labels", 1) == 2 else logits
+            probs_native = torch.sigmoid(fg_logits)
             probs_up = torch.nn.functional.interpolate(
-                probs_small, size=(DISPLAY_SIZE, DISPLAY_SIZE), mode="bilinear", align_corners=False
+                probs_native, size=(DISPLAY_SIZE, DISPLAY_SIZE), mode="bilinear", align_corners=False
             )
             probs = probs_up.squeeze().numpy()
 
     elif arch in EXTERNAL_MODELS:
+        spec = EXTERNAL_MODELS[arch]
+        res = spec.get("resolution", DISPLAY_SIZE)
         pre = get_ext_preprocessor()
         result = pre.preprocess(raw_img, return_intermediates=True)
         small = cv2.resize(result["preprocessed"], (DISPLAY_SIZE, DISPLAY_SIZE), interpolation=cv2.INTER_AREA)
@@ -383,8 +418,16 @@ def run_inference(raw_img: np.ndarray, arch: str, best_thresh: float):
             return small, disk_small, np.zeros((DISPLAY_SIZE, DISPLAY_SIZE), dtype=np.float32), \
                 np.zeros((DISPLAY_SIZE, DISPLAY_SIZE), dtype=np.uint8)
         with torch.no_grad():
-            inp = torch.from_numpy(small.astype(np.float32) / 255.0).unsqueeze(0).unsqueeze(0)
-            probs = torch.sigmoid(model(inp)).squeeze().numpy()
+            # Resized directly from the full-resolution preprocessed image at the model's
+            # own trained resolution (not from the already-downsampled "small") for best accuracy.
+            model_in = cv2.resize(result["preprocessed"], (res, res), interpolation=cv2.INTER_AREA)
+            inp = torch.from_numpy(model_in.astype(np.float32) / 255.0).unsqueeze(0).unsqueeze(0)
+            probs_native = torch.sigmoid(model(inp))
+            if res != DISPLAY_SIZE:
+                probs_native = torch.nn.functional.interpolate(
+                    probs_native, size=(DISPLAY_SIZE, DISPLAY_SIZE), mode="bilinear", align_corners=False
+                )
+            probs = probs_native.squeeze().numpy()
     else:
         enhanced_img, disk_mask = preprocessor.preprocess(raw_img)
         small = cv2.resize(enhanced_img, (DISPLAY_SIZE, DISPLAY_SIZE), interpolation=cv2.INTER_AREA)
