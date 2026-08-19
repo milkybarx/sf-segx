@@ -1,0 +1,34 @@
+# Data (downloaded separately, see README "Get the data")
+data/
+cache_512/
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Scratch
+scratch_*
+.claude/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# ML model files
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Checkpoints
+checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment/secrets
+.env

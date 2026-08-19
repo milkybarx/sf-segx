@@ -1,0 +1,6 @@
+best_val_dice=0.6611
+best_threshold=0.3
+best_threshold_dice=0.6623
+epochs=15
+train_size=601
+val_size=106
