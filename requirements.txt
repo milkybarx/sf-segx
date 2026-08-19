@@ -5,8 +5,14 @@
 # Community Cloud build -- if you need those for local dev, install them separately.
 
 # Core deep learning
-torch==2.6.0
-torchvision==0.21.0
+# torch==2.6.0 (what this repo was trained/tested with locally) has NO published wheels for
+# Python 3.14, which is what Streamlit Community Cloud currently runs -- pip/uv both fail to
+# resolve it there ("no wheels with a matching Python ABI tag"). Pinned to the newest version
+# that Cloud's Python 3.14.7 actually has wheels for instead (confirmed against its own error
+# output listing available versions). Inference-only usage (load a state_dict, run forward())
+# is stable across this range, so this doesn't affect model behavior.
+torch==2.13.0
+torchvision==0.28.0
 segmentation-models-pytorch==0.5.0
 monai==1.6.0
 transformers==5.14.1
