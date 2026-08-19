@@ -116,8 +116,14 @@ def _build_mask2former_model(checkpoint: dict):
 
 
 def _build_segformer_model():
+    # Loads the MiT-B0 config from a local JSON snapshot (configs/segformer_mitb0_config.json)
+    # instead of SegformerConfig.from_pretrained("nvidia/mit-b0", ...), which hits HuggingFace
+    # Hub over the network every time -- pointless here since checkpoints/segformer_b0_best.pt
+    # already has every trained weight; the "pretrained" config is only used for its
+    # architecture shape, not any actual pretrained values.
     from transformers import SegformerConfig, SegformerForSemanticSegmentation
-    config = SegformerConfig.from_pretrained("nvidia/mit-b0", num_labels=1)
+    config_path = os.path.join(ROOT, "configs", "segformer_mitb0_config.json")
+    config = SegformerConfig.from_json_file(config_path)
     return SegformerForSemanticSegmentation(config)
 
 
@@ -140,7 +146,8 @@ def get_model(arch: str):
                     m = _build_mask2former_model(checkpoint)
                 m.load_state_dict(checkpoint["model_state_dict"])
             else:
-                m = MODEL_REGISTRY[arch]["build"]()
+                spec = MODEL_REGISTRY[arch]
+                m = spec.get("build_inference", spec["build"])()
                 state = torch.load(ckpt, map_location=device)
                 # Some checkpoints are stored fp16 on disk to stay under GitHub's 100MB
                 # single-file limit (e.g. deeplabv3plus_resnet50_best.pth, 107MB -> 54MB) --

@@ -45,8 +45,17 @@ NUM_WORKERS = 0  # Windows uses spawn for multiprocessing, which can't pickle cv
 MODEL_REGISTRY = {
     "unet_resnet34": {
         "label": "U-Net (ResNet-34)",
+        # "build": used for training -- ImageNet weights genuinely help transfer learning.
         "build": lambda: smp.Unet(
             encoder_name="resnet34", encoder_weights="imagenet",
+            in_channels=1, classes=1, activation=None,
+        ),
+        # "build_inference": used by model_hub.get_model() (dashboard/inference) -- skips the
+        # ImageNet download entirely, since load_state_dict() immediately overwrites every
+        # weight with our own trained checkpoint anyway. Also makes offline/no-network
+        # inference actually work instead of failing on a pointless fetch.
+        "build_inference": lambda: smp.Unet(
+            encoder_name="resnet34", encoder_weights=None,
             in_channels=1, classes=1, activation=None,
         ),
         "checkpoint": "unet_resnet34_best.pth",
@@ -61,12 +70,17 @@ MODEL_REGISTRY = {
             encoder_name="resnet50", encoder_weights="imagenet",
             in_channels=1, classes=1, activation=None,
         ),
+        "build_inference": lambda: smp.DeepLabV3Plus(
+            encoder_name="resnet50", encoder_weights=None,
+            in_channels=1, classes=1, activation=None,
+        ),
         "checkpoint": "deeplabv3plus_resnet50_best.pth",
     },
     "attention_unet": {
         # MONAI's AttentionUnet is a from-scratch architecture (no swappable ImageNet
         # encoder backbone, unlike the smp models above) -- attention gates on the skip
-        # connections instead of a pretrained encoder.
+        # connections instead of a pretrained encoder, so it never touches the network
+        # regardless; "build_inference" is identical to "build" here.
         "label": "Attention U-Net (MONAI)",
         "build": lambda: __import__("monai.networks.nets", fromlist=["AttentionUnet"]).AttentionUnet(
             spatial_dims=2, in_channels=1, out_channels=1,
@@ -75,6 +89,7 @@ MODEL_REGISTRY = {
         "checkpoint": "attention_unet_best.pth",
     },
 }
+MODEL_REGISTRY["attention_unet"]["build_inference"] = MODEL_REGISTRY["attention_unet"]["build"]
 
 
 class GONGPreprocessor:
