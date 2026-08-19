@@ -36,6 +36,18 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225])
 
 from train_smp import GONGPreprocessor, IMG_DIR, MASK_DIR, CHECKPOINT_DIR, MODEL_REGISTRY  # noqa: E402
 
+# data/ (the 3GB Kaggle dataset) is gitignored -- deployed environments (e.g. Streamlit
+# Community Cloud) never have it. The Validation Gallery needs *some* real images+masks to
+# show, so it prefers the full dataset when present (local dev) and falls back to a small
+# curated set bundled directly in the repo (assets/gallery_samples/, ~32MB, 40 pairs chosen
+# for visible filament content) when it isn't -- rather than silently showing nothing.
+_BUNDLED_IMG_DIR = os.path.join(ROOT, "assets", "gallery_samples", "images")
+_BUNDLED_MASK_DIR = os.path.join(ROOT, "assets", "gallery_samples", "masks")
+if os.path.isdir(IMG_DIR) and glob.glob(f"{IMG_DIR}/*.jpeg"):
+    GALLERY_IMG_DIR, GALLERY_MASK_DIR = IMG_DIR, MASK_DIR
+else:
+    GALLERY_IMG_DIR, GALLERY_MASK_DIR = _BUNDLED_IMG_DIR, _BUNDLED_MASK_DIR
+
 EXTERNAL_MODELS = {
     "mask2former_scratch": {
         "label": "Mask2Former (from scratch)",
@@ -94,7 +106,8 @@ def shuffled_sample_paths(seed: int, n: int = 6):
     key = (seed, n)
     if key not in _sample_paths_cache:
         paths = sorted(
-            glob.glob(f"{IMG_DIR}/*.jpg") + glob.glob(f"{IMG_DIR}/*.jpeg") + glob.glob(f"{IMG_DIR}/*.png")
+            glob.glob(f"{GALLERY_IMG_DIR}/*.jpg") + glob.glob(f"{GALLERY_IMG_DIR}/*.jpeg")
+            + glob.glob(f"{GALLERY_IMG_DIR}/*.png")
         )
         rng = np.random.RandomState(seed)
         idx = rng.choice(len(paths), size=min(n, len(paths)), replace=False)
@@ -391,7 +404,7 @@ def run_inference(raw_img: np.ndarray, arch: str, best_thresh: float):
 
 def load_gt_mask(img_path: str, display_size: int = DISPLAY_SIZE):
     fn = os.path.splitext(os.path.basename(img_path))[0]
-    gt_full = cv2.imread(os.path.join(MASK_DIR, fn + ".png"), cv2.IMREAD_GRAYSCALE)
+    gt_full = cv2.imread(os.path.join(GALLERY_MASK_DIR, fn + ".png"), cv2.IMREAD_GRAYSCALE)
     if gt_full is None:
         return np.zeros((display_size, display_size), dtype=np.uint8)
     gt_full = (gt_full > 127).astype(np.uint8)
