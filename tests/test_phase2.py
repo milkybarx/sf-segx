@@ -10,6 +10,7 @@ from postprocessing.spatial import spatial_region
 from postprocessing.thresholding import probability_to_mask, segmentation_metrics
 from visualization.phase2 import _instance_panel
 from visualization.detail import crop_filament, high_quality_upscale, selected_overlay
+from inference.adapters import StandardizedPrediction
 
 
 def test_probability_metrics_and_mask():
@@ -75,3 +76,16 @@ def test_detail_crop_and_optional_enhancement():
                                show_mask=False, show_skeleton=False,
                                show_bbox=False, show_labels=False)
     assert overlay.shape == (70, 80, 3)
+
+
+def test_standardized_prediction_contract():
+    mask = np.zeros((16, 20), dtype=np.uint8)
+    probability = np.zeros((16, 20), dtype=np.float32)
+    prediction = StandardizedPrediction(
+        mask=mask, probability=probability, confidence=0.0,
+        model_name="segformer_b0", model_checkpoint="checkpoint.pt",
+        image=np.zeros((16, 20), dtype=np.uint8), preprocessed=np.zeros((8, 8), dtype=np.uint8),
+        disk_mask=np.ones((16, 20), dtype=bool),
+    )
+    assert prediction.mask.shape == prediction.probability.shape
+    assert prediction.model_name == "segformer_b0"

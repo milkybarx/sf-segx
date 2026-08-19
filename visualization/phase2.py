@@ -86,7 +86,7 @@ def _instance_panel(image: np.ndarray, filaments: List[Dict], skeleton: bool = F
     placed_labels = []
     label_specs = []
     filament_rects = []
-    for filament_index, filament in enumerate(filaments):
+    for filament in filaments:
         bbox = filament["bbox"]
         source_width = filament.get("image_width", image_width)
         source_height = filament.get("image_height", image_height)
@@ -180,7 +180,7 @@ def save_filament_crops(image: np.ndarray, filaments: List[Dict], output_dir: st
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     paths = []
-    for filament in filaments:
+    for filament_index, filament in enumerate(filaments):
         bbox = filament["bbox"]
         x0, y0 = max(0, bbox["x_min"] - padding), max(0, bbox["y_min"] - padding)
         x1 = min(image.shape[1], bbox["x_max"] + padding)

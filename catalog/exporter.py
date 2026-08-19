@@ -11,7 +11,7 @@ def export_catalog(records: List[Dict], output_dir: str | Path) -> tuple[Path, P
     directory.mkdir(parents=True, exist_ok=True)
     json_path, csv_path = directory / "filament_catalog.json", directory / "filament_catalog.csv"
     json_path.write_text(json.dumps(records, indent=2), encoding="utf-8")
-    fields = ["image_id", "timestamp", "model", "filament_id", "confidence", "area_px", "perimeter_px",
+    fields = ["image_id", "timestamp", "model", "model_name", "model_checkpoint", "threshold", "filament_id", "confidence", "area_px", "perimeter_px",
               "skeleton_length_px", "average_width_px", "sinuosity", "orientation_deg", "centroid",
               "bbox", "spatial_region", "physical"]
     with csv_path.open("w", newline="", encoding="utf-8") as stream:

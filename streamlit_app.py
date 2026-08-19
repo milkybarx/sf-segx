@@ -141,8 +141,8 @@ arch = st.sidebar.selectbox(
     "Model", options=list(labels.keys()), format_func=lambda a: labels[a],
     index=list(labels.keys()).index(default_arch),
 )
-phase2_threshold = st.sidebar.slider("Mask2Former threshold", 0.20, 0.75, 0.50, 0.01)
-show_explainability = st.sidebar.checkbox("Mask2Former explainability", value=False)
+phase2_threshold = st.sidebar.slider("Segmentation threshold", 0.20, 0.75, 0.50, 0.01)
+show_explainability = st.sidebar.checkbox("Explainability (when supported)", value=False)
 
 page = st.sidebar.radio("View", ["Overview", "Validation Gallery", "Upload Image", "Upload Video"])
 
@@ -264,9 +264,10 @@ elif page == "Upload Image":
             status = cached_status(arch)
             best_thresh = status["best_threshold"]["threshold"] if status.get("best_threshold") else 0.5
             with st.spinner("Running segmentation..."):
-                if arch == "mask2former":
+                if arch in hub.all_archs():
                     from inference.phase2 import run_phase2_analysis
-                    phase2_result = run_phase2_analysis(raw, image_id=uploaded.name, threshold=phase2_threshold,
+                    phase2_result = run_phase2_analysis(raw, image_id=uploaded.name, model_name=arch,
+                                                        threshold=phase2_threshold,
                                                         explain=show_explainability)
                     phase2_inference = phase2_result["inference"]
                     small = phase2_inference.preprocessed
@@ -293,6 +294,7 @@ elif page == "Upload Image":
             if phase2_result:
                 from visualization.phase2 import _instance_panel, create_phase2_figure
                 from visualization.detail import crop_filament, detail_record, save_detail_artifacts, selected_overlay
+                st.caption(f"Phase 2 model: {phase2_result['model_name']} · threshold {phase2_result['threshold']:.2f}")
                 annotated_panel = _instance_panel(raw, filaments)
                 skeleton_panel = _instance_panel(raw, filaments, skeleton=True)
                 with st.expander("View high-resolution visualization", expanded=True):
@@ -303,7 +305,7 @@ elif page == "Upload Image":
                 st.download_button("Download JSON catalog", json.dumps(phase2_result["catalog"], indent=2),
                                    file_name="filament_catalog.json", mime="application/json")
                 csv_buffer = io.StringIO()
-                writer = csv.DictWriter(csv_buffer, fieldnames=["image_id", "model", "filament_id", "confidence", "area_px", "skeleton_length_px", "sinuosity", "orientation_deg", "spatial_region"])
+                writer = csv.DictWriter(csv_buffer, fieldnames=["image_id", "model_name", "model_checkpoint", "threshold", "filament_id", "confidence", "area_px", "skeleton_length_px", "sinuosity", "orientation_deg", "spatial_region"])
                 writer.writeheader()
                 writer.writerows({key: record.get(key) for key in writer.fieldnames} for record in phase2_result["catalog"])
                 st.download_button("Download CSV catalog", csv_buffer.getvalue(), file_name="filament_catalog.csv", mime="text/csv")
@@ -329,18 +331,15 @@ elif page == "Upload Image":
                 enhanced_crop = cached_detail_upscale(detail_crop, 2) if detail_sr else None
                 detail_attribution = phase2_result["attribution"]
                 if show_detail_xai and detail_attribution is None:
-                    from explainability.segmentation_attribution import segmentation_attribution
-                    detail_model, _ = hub.get_model("mask2former")
-                    if detail_model is not None:
-                        detail_input_mask = cv2.resize(
-                            phase2_inference.mask,
-                            (phase2_inference.preprocessed.shape[1], phase2_inference.preprocessed.shape[0]),
-                            interpolation=cv2.INTER_NEAREST,
-                        )
+                    if phase2_result["explainability_supported"]:
+                        from explainability.interface import generate_explanation
+                        detail_model, _ = hub.get_model(arch)
                         with st.spinner("Computing selected-image attribution..."):
-                            detail_attribution = segmentation_attribution(
-                                detail_model, phase2_inference.preprocessed, detail_input_mask,
+                            detail_attribution = generate_explanation(
+                                detail_model, raw, phase2_inference, arch,
                             )
+                    else:
+                        st.info("Explainability is not currently supported for this model.")
                 detail_overlay = selected_overlay(
                     detail_crop, selected, phase2_result["labels"], crop_bounds,
                     show_mask=show_detail_mask, show_skeleton=show_detail_skeleton,

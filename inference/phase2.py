@@ -13,6 +13,7 @@ from postprocessing.skeleton import analyze_skeleton
 from postprocessing.spatial import add_spatial_metadata
 from postprocessing.thresholding import probability_to_mask
 from inference.mask2former import Mask2FormerInference, run_mask2former_inference
+from inference.adapters import StandardizedPrediction, get_segmentation_adapter
 
 
 def morphology_risk_screening(filament: Dict) -> str:
@@ -24,29 +25,31 @@ def morphology_risk_screening(filament: Dict) -> str:
 
 
 def run_phase2_analysis(image: np.ndarray, image_id: str = "image",
-                        model=None, threshold: float = 0.5, min_area: int = 50,
+                        model=None, model_name: str = "mask2former", threshold: float = 0.5, min_area: int = 50,
                         calibration: Optional[Dict] = None, timestamp: Optional[str] = None,
                         explain: bool = False, output_dir: Optional[str | Path] = None) -> Dict:
-    """Run Mask2Former inference, pixel morphology, optional explanation, and exports."""
-    if explain and model is None:
+    """Run common Phase 2 analysis on the selected model's standardized prediction."""
+    adapter = get_segmentation_adapter(model_name, model)
+    if model is None and explain and adapter.supports_explainability:
         from model_hub import get_model
-        model, _ = get_model("mask2former")
-    inference: Mask2FormerInference = run_mask2former_inference(image, model, threshold)
-    mask = probability_to_mask(inference.probability, threshold)
-    labels, filaments = separate_filaments(mask, inference.probability, min_area)
+        model, _ = get_model(model_name)
+        adapter.model = model
+    prediction: StandardizedPrediction = adapter.predict(image, threshold)
+    mask = probability_to_mask(prediction.probability, threshold)
+    labels, filaments = separate_filaments(mask, prediction.probability, min_area)
     attribution = None
     if explain:
-        from explainability.segmentation_attribution import segmentation_attribution
-        small_mask = cv2.resize(mask, (inference.preprocessed.shape[1], inference.preprocessed.shape[0]), interpolation=cv2.INTER_NEAREST)
-        attribution = segmentation_attribution(model, inference.preprocessed, small_mask) if model is not None else None
+        from explainability.interface import generate_explanation
+        attribution = generate_explanation(model, image, prediction, model_name) if adapter.supports_explainability and model is not None else None
     for filament in filaments:
         filament.update(analyze_skeleton(filament.pop("component_mask")))
-        add_spatial_metadata(filament, inference.image_shape)
-        filament["image_width"] = int(inference.image_shape[1])
-        filament["image_height"] = int(inference.image_shape[0])
+        add_spatial_metadata(filament, image.shape[:2])
+        filament["image_width"] = int(image.shape[1])
+        filament["image_height"] = int(image.shape[0])
         filament["physical"] = physical_measurements(filament["skeleton_length_px"], filament["area_px"], calibration)
         filament["risk_screening_indicator"] = morphology_risk_screening(filament)
-    records = build_catalog(filaments, image_id, timestamp)
+    records = build_catalog(filaments, image_id, timestamp, model_name=model_name,
+                             model_checkpoint=prediction.model_checkpoint, threshold=threshold)
     validate_catalog(records)
     paths = None
     figure = None
@@ -54,14 +57,17 @@ def run_phase2_analysis(image: np.ndarray, image_id: str = "image",
         directory = Path(output_dir)
         directory.mkdir(parents=True, exist_ok=True)
         from visualization.phase2 import create_phase2_figure
-        figure = create_phase2_figure(inference.image, inference.probability, mask, filaments, attribution,
+        figure = create_phase2_figure(image, prediction.probability, mask, filaments, attribution,
                                       directory / "phase2_analysis.png")
         figure.clf()
         from visualization.phase2 import save_filament_crops
-        crop_paths = save_filament_crops(inference.image, filaments, directory / "filament_crops")
+        crop_paths = save_filament_crops(image, filaments, directory / "filament_crops")
         paths = export_catalog(records, directory / "catalog")
     else:
         crop_paths = []
-    return {"image_id": image_id, "model": "mask2former", "threshold": threshold,
-            "inference": inference, "labels": labels, "filaments": filaments,
-            "catalog": records, "attribution": attribution, "exports": paths, "crop_paths": crop_paths}
+    return {"image_id": image_id, "model": model_name, "model_name": model_name,
+            "model_checkpoint": prediction.model_checkpoint, "threshold": threshold,
+            "prediction": prediction, "inference": prediction, "labels": labels,
+            "filaments": filaments, "catalog": records, "attribution": attribution,
+            "explainability_supported": adapter.supports_explainability,
+            "exports": paths, "crop_paths": crop_paths}

@@ -3,10 +3,13 @@ from typing import Dict, List, Optional
 
 
 def filament_record(filament: Dict, image_id: str, timestamp: Optional[str] = None,
-                    physical: Optional[Dict] = None) -> Dict:
+                    physical: Optional[Dict] = None, model_name: str = "mask2former",
+                    model_checkpoint: Optional[str] = None, threshold: float = 0.5) -> Dict:
     """Create a stable JSON/CSV-ready filament record."""
     bbox = filament.get("bbox", {})
-    record = {"image_id": image_id, "timestamp": timestamp, "model": "mask2former",
+    record = {"image_id": image_id, "timestamp": timestamp, "model": model_name,
+              "model_name": model_name, "model_checkpoint": model_checkpoint,
+              "threshold": float(threshold),
               "filament_id": int(filament["filament_id"]), "confidence": float(filament.get("confidence", 0.0)),
               "area_px": float(filament.get("area_px", 0.0)), "perimeter_px": float(filament.get("perimeter_px", 0.0)),
               "skeleton_length_px": float(filament.get("skeleton_length_px", 0.0)),
@@ -23,6 +26,9 @@ def filament_record(filament: Dict, image_id: str, timestamp: Optional[str] = No
     return record
 
 
-def build_catalog(filaments: List[Dict], image_id: str, timestamp: Optional[str] = None) -> List[Dict]:
+def build_catalog(filaments: List[Dict], image_id: str, timestamp: Optional[str] = None,
+                  model_name: str = "mask2former", model_checkpoint: Optional[str] = None,
+                  threshold: float = 0.5) -> List[Dict]:
     """Build records while excluding internal NumPy component masks."""
-    return [filament_record(f, image_id, timestamp, f.get("physical")) for f in filaments]
+    return [filament_record(f, image_id, timestamp, f.get("physical"), model_name,
+                            model_checkpoint, threshold) for f in filaments]
