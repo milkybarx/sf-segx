@@ -17,7 +17,12 @@ def segmentation_attribution(model: torch.nn.Module, preprocessed: np.ndarray,
     model.eval()
     model.zero_grad(set_to_none=True)
     logits = model(tensor)
-    weights = torch.from_numpy(target_mask.astype(np.float32))[None, None] if target_mask is not None else torch.sigmoid(logits).detach()
+    # An empty predicted mask (no filaments detected) makes (logits * weights) a constant
+    # zero regardless of the input, so its gradient -- and therefore the whole attribution
+    # map -- is exactly zero everywhere. Fall back to the raw probability map in that case,
+    # which is never uniformly zero and still shows what the model was (not) responding to.
+    has_target = target_mask is not None and bool(np.any(target_mask))
+    weights = torch.from_numpy(target_mask.astype(np.float32))[None, None] if has_target else torch.sigmoid(logits).detach()
     objective = (logits * weights).mean()
     objective.backward()
     attribution = tensor.grad.detach().abs().squeeze().cpu().numpy()

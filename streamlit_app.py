@@ -342,6 +342,33 @@ elif page == "Upload Image":
             cols[2].image(overlay_rgb(small, pred, color=(220, 20, 60)), caption="Predicted Filaments", width='stretch')
             cols[3].image(confidence_rgb(probs), caption="Confidence Heatmap", width='stretch')
 
+            st.divider()
+            run_ensemble = st.checkbox(
+                "Run Ensemble Consensus & Uncertainty (all 5 models + test-time augmentation — slower)",
+                value=False, key="run_ensemble",
+            )
+            if run_ensemble:
+                from inference.ensemble import run_ensemble_inference
+                with st.spinner("Running all 5 models with test-time augmentation..."):
+                    ens_small, ens_disk, ens_probs, ens_mask, ens_weights, agreement = run_ensemble_inference(raw)
+                st.markdown("#### Ensemble Consensus & Uncertainty")
+                st.caption(
+                    "Weighted-averaged prediction across every trained model (weights: "
+                    + ", ".join(f"{a} {w:.3f}" for a, w in ens_weights.items())
+                    + f") with test-time augmentation. Measured honestly: this does not "
+                    "always beat the single best model's raw Dice — its real value is the "
+                    "agreement map, which flags where independently-architected models "
+                    "disagree (a signal a single model's own confidence score can't give you)."
+                )
+                ecols = st.columns(3)
+                ecols[0].image(overlay_rgb(ens_small, ens_mask, color=(220, 20, 60)),
+                               caption="Ensemble Prediction", width='stretch')
+                ecols[1].image(confidence_rgb(ens_probs), caption="Ensemble Confidence", width='stretch')
+                agreement_heat = (np.clip(1.0 - agreement, 0, 1) * 255).astype(np.uint8)
+                agreement_rgb = cv2.applyColorMap(agreement_heat, cv2.COLORMAP_HOT)
+                agreement_rgb = cv2.cvtColor(agreement_rgb, cv2.COLOR_BGR2RGB)
+                ecols[2].image(agreement_rgb, caption="Model Disagreement (bright = models conflict)", width='stretch')
+
             from visualization.phase2 import _instance_panel, create_phase2_figure
             from visualization.detail import crop_filament, detail_record, save_detail_artifacts, selected_overlay
             st.caption(f"Phase 2 model: {phase2_result['model_name']} · threshold {phase2_result['threshold']:.2f}")

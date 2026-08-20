@@ -148,8 +148,8 @@ segmentation models, generalized here to work with every architecture in the Res
 (not just one): `postprocessing/` (connected-component instance separation, skeleton
 analysis, spatial-region tagging, physical-unit calibration), `catalog/` (a validated
 JSON/CSV filament schema, exported per-image and per-filament from the Upload Image page),
-`explainability/interface.py` (a pluggable attribution hook, currently unsupported for the
-models registered here — see *Known limitations*), and `inference/adapters.py` (a
+`explainability/interface.py` (a pluggable input-gradient attribution hook, currently
+supported for Mask2Former only — see *Known limitations*), and `inference/adapters.py` (a
 model-agnostic `StandardizedPrediction` wrapper around `model_hub.run_inference()`, so the
 whole pipeline works for any registered model without per-architecture special-casing).
 `inference/phase2.run_phase2_analysis()` ties these together and is what the Upload Image
@@ -172,14 +172,45 @@ python experiments/super_resolution/training/train_sr.py --scale 2 --model solar
 python experiments/super_resolution/training/train_sr.py --scale 4 --model solar_sr --epochs 20
 ```
 
-Two real bugs were found and fixed while integrating this: `tests/test_phase2.py` imported
-a function (`high_quality_upscale`) that had been renamed to `super_resolve_crop` in the
-same commit that added AI super-resolution, and `postprocessing/instances.py` assumed every
-filament dict already carried a `component_id` key that `analysis/filament_morphology.
-analyze_filaments()` never actually set (fixed by adding it there). Both were silent
-failures — the first only surfaces when running the test suite, the second only when the
-Phase 2 pipeline runs at all, since Python doesn't catch a missing dict key until the line
-that reads it executes.
+Four real bugs were found and fixed while integrating this:
+- `tests/test_phase2.py` imported a function (`high_quality_upscale`) that had been renamed
+  to `super_resolve_crop` in the same commit that added AI super-resolution.
+- `postprocessing/instances.py` assumed every filament dict already carried a `component_id`
+  key that `analysis/filament_morphology.analyze_filaments()` never actually set (fixed by
+  adding it there).
+- `explainability/interface.py`'s attribution dispatch only recognized `"mask2former"`/
+  `"mask2former_scratch"`, arch names from an earlier version of this repo that no longer
+  exist in `model_hub.EXTERNAL_MODELS` (the current key is `"mask2former_phase3"`) — the
+  attribution panel was silently blank for every model, always, not from any per-image issue.
+- Even after that fix, attribution was still blank on any image where the model detected
+  *no* filaments: `segmentation_attribution()`'s objective is `(logits * target_mask).mean()`,
+  and an all-zero `target_mask` makes that a constant zero regardless of the input, so its
+  gradient — and the whole attribution map — is exactly zero everywhere. Fixed to fall back
+  to the raw sigmoid probability map (never uniformly zero) whenever the predicted mask is
+  empty.
+
+All were silent failures with no exception raised — the kind that only surface by actually
+looking at the output, which is why each was caught by running the pipeline end-to-end
+against real images rather than trusting that "it imports without errors" meant it worked.
+
+### Ensemble consensus & uncertainty
+
+`inference/ensemble.py` weighted-averages every trained model's probability map (weighted by
+each model's own best validation Dice) with test-time augmentation (the same model's
+prediction on horizontal/vertical flips of the input, flipped back and averaged in). Measured
+honestly on an 8-image held-out sample rather than assumed: the full 5-model ensemble
+(0.628 mean Dice) did **not** beat Mask2Former alone (0.647) — Mask2Former is enough stronger
+than the other four that averaging them in mostly dilutes it. TTA alone did measurably help
+(ensemble without TTA: 0.623, with TTA: 0.628).
+
+So this feature's real value isn't "beats the best single model's Dice" — it's the **per-pixel
+model-agreement map** it also returns: the fraction of models whose own thresholded
+prediction matches the ensemble's final call at each pixel. Where several architecturally
+distinct models (different backbones, resolutions, training recipes) agree, that detection is
+corroborated across independent failure modes; where they conflict, that's a genuine
+uncertainty signal a single model's own confidence score can't provide (a model can be
+confidently wrong). Available as an opt-in checkbox on the Upload Image page (it costs ~5x a
+single model's inference, or more with TTA, so it isn't run by default).
 
 ### MedSAM — attempted, not included
 
@@ -238,7 +269,9 @@ work.
 ├── visualization/
 │   └── viz.py
 ├── inference/
-│   └── predict.py               # SolarFilamentPredictor: unet/frangi/hybrid inference
+│   ├── predict.py                # SolarFilamentPredictor: unet/frangi/hybrid inference
+│   ├── adapters.py, phase2.py, mask2former.py  # Phase 2 pipeline (see Results section)
+│   └── ensemble.py               # multi-model + TTA consensus/uncertainty (see Results section)
 ├── checkpoints/                  (tracked in git via Git LFS -- see "Checkpoints ship in the repo")
 │   ├── mask2former_phase3_768_best.pth  # 0.7207 Dice, best model (fp16 on disk, ~45MB)
 │   ├── segformer_b2_best.pt     # 0.6970 Dice (fp16 on disk, ~55MB, see preprocessing caveat above)
@@ -423,6 +456,13 @@ Frangi, or hybrid prediction on a single image and returns every intermediate
   semantic segmenters. Turning predictions into per-filament instances (for a leaderboard
   submission) is future work; the full-disk instance panel in `notebooks/Copy_of_FINAL_SOLAR.ipynb`
   demonstrates one connected-components-based approach to doing so.
+- `explainability/interface.py`'s input-gradient attribution only works for Mask2Former --
+  its tensor construction (single-channel, positional `model(tensor)` call) doesn't match
+  SegFormer's `pixel_values=` keyword/3-channel-RGB calling convention or the exact
+  normalization the `train_smp.py` models were trained with, so it isn't wired up for those.
+- The 5-model ensemble in `inference/ensemble.py` does not reliably beat Mask2Former alone on
+  raw Dice (see *Ensemble consensus & uncertainty* above) -- use it for the agreement/
+  uncertainty map, not as a way to get a higher-Dice prediction than the best single model.
 
 ## Tech Stack
 

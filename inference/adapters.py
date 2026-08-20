@@ -34,7 +34,10 @@ class SegmentationModelAdapter:
 
     @property
     def supports_explainability(self) -> bool:
-        return self.model_name in {"mask2former", "mask2former_scratch"}
+        # "mask2former"/"mask2former_scratch" are stale arch names from an earlier version
+        # of this repo's model_hub.py -- the currently-registered Mask2Former is
+        # "mask2former_phase3" (see model_hub.EXTERNAL_MODELS).
+        return self.model_name in {"mask2former_phase3"}
 
     def predict(self, image: np.ndarray, threshold: float = 0.5) -> StandardizedPrediction:
         """Return HxW arrays regardless of the selected model architecture."""
