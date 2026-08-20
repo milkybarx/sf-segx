@@ -27,13 +27,26 @@ One backbone/encoder per architecture family — no redundant variants of the sa
 |---|---|---|---|---|---|---|
 | **Mask2Former** | ResNet-34 (ImageNet), 768px | 22.6M | 50 | **0.7207** | 0.5708 | Best model overall. See *leakage caveat* below |
 | SegFormer | MiT-B2 (ImageNet), 640px | 27.3M | 36 | 0.6970 | — | See *SegFormer preprocessing* note below |
-| U-Net | ResNet-34 (ImageNet) | 24.4M | 15 | 0.6611 | 0.4945 | Clean file-level split |
+| U-Net | ResNet-34 (ImageNet) | 24.4M | 80 | 0.6629 | 0.4960 | Clean file-level split. Retrained 15→80 epochs + cosine LR; plateaued at epoch 37, see note below |
 | DeepLabV3+ | ResNet-50 (ImageNet) | 26.7M | 35 | 0.6521 | 0.4844 | Clean file-level split |
 | Attention U-Net | MONAI, from scratch | 7.9M | 20/25 | 0.6507 | 0.4829 | Run crashed epoch 22 on a transient file-read error (fixed); finalized from the epoch-20 checkpoint rather than re-run, since Dice had plateaued/was oscillating in 0.63-0.65 for ~10 epochs |
 
 All trained models are in `checkpoints/` and selectable live in the dashboard
 (`streamlit_app.py`), including on your own uploaded images/videos. A fine-tuned
 SAM/MedSAM is still scoped for a future pass — not included yet (see below).
+
+### An honest result: pushing U-Net further
+
+U-Net was originally trained for only 15 epochs (0.6611 Dice) — clearly undertrained next to
+Mask2Former's 50. Re-trained for 80 epochs with a cosine LR schedule added to `train_smp.py`
+(previously flat for the whole run) to see how far it could go. Reported plainly: **it
+plateaued at 0.6629 by epoch 37 and never improved again** — by epoch 80, train Dice had
+climbed to 0.74 while validation Dice sat at 0.656, a widening train/val gap that's a
+textbook overfitting signal, not a sign more epochs would help. More training time alone
+wasn't the bottleneck this architecture/resolution combination had; closing the remaining gap
+to Mask2Former would need a different lever (higher resolution, stronger regularization or
+augmentation, or a bigger backbone), not just a longer run. Kept as the new checkpoint anyway
+since it is a genuine, if small, improvement (0.6611 → 0.6636 at its optimal threshold).
 
 ### A correction worth being upfront about
 
@@ -275,7 +288,7 @@ work.
 ├── checkpoints/                  (tracked in git via Git LFS -- see "Checkpoints ship in the repo")
 │   ├── mask2former_phase3_768_best.pth  # 0.7207 Dice, best model (fp16 on disk, ~45MB)
 │   ├── segformer_b2_best.pt     # 0.6970 Dice (fp16 on disk, ~55MB, see preprocessing caveat above)
-│   ├── unet_resnet34_best.pth   # 0.6611 Dice (fp16 on disk, ~46MB)
+│   ├── unet_resnet34_best.pth   # 0.6629 Dice, 80 epochs (fp16 on disk, ~46MB)
 │   ├── deeplabv3plus_resnet50_best.pth  # 0.6521 Dice (fp16 on disk, ~51MB)
 │   ├── attention_unet_best.pth  # 0.6507 Dice (epoch 20/25, see caveat above)
 │   └── color_to_halpha_adapter.pth  # color image -> H-alpha style, shared by all 5 above
