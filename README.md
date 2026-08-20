@@ -26,7 +26,7 @@ One backbone/encoder per architecture family — no redundant variants of the sa
 | Model | Backbone | Params | Epochs | Best Val Dice | Best Val IoU | Notes |
 |---|---|---|---|---|---|---|
 | **Mask2Former** | ResNet-34 (ImageNet), 768px | 22.6M | 50 | **0.7207** | 0.5708 | Best model overall. See *leakage caveat* below |
-| SegFormer | MiT-B2 (ImageNet), 640px | 27.3M | 36 | 0.6970 | — | See *SegFormer preprocessing* note below |
+| SegFormer | MiT-B2 (ImageNet), 640px | 27.3M | 36 | 0.6970 | — | See *SegFormer preprocessing* note; a 768px retry landed slightly lower, see *second honest result* below |
 | U-Net | ResNet-34 (ImageNet) | 24.4M | 80 | 0.6629 | 0.4960 | Clean file-level split. Retrained 15→80 epochs + cosine LR; plateaued at epoch 37, see note below |
 | DeepLabV3+ | ResNet-50 (ImageNet) | 26.7M | 35 | 0.6521 | 0.4844 | Clean file-level split |
 | Attention U-Net | MONAI, from scratch | 7.9M | 20/25 | 0.6507 | 0.4829 | Run crashed epoch 22 on a transient file-read error (fixed); finalized from the epoch-20 checkpoint rather than re-run, since Dice had plateaued/was oscillating in 0.63-0.65 for ~10 epochs |
@@ -47,6 +47,25 @@ wasn't the bottleneck this architecture/resolution combination had; closing the 
 to Mask2Former would need a different lever (higher resolution, stronger regularization or
 augmentation, or a bigger backbone), not just a longer run. Kept as the new checkpoint anyway
 since it is a genuine, if small, improvement (0.6611 → 0.6636 at its optimal threshold).
+
+### A second honest result: retraining SegFormer-B2 at higher resolution
+
+Found the actual training notebook the shipped `segformer_b2_best.pt` came from
+(`notebooks/SegFormer_B2_Solar_Filament_Training.ipynb`) and adapted it into
+`scripts/train_segformer_b2.py` to retry with two changes: 768px input instead of the
+shipped 640px (on the theory that higher resolution helped Mask2Former, so it might help
+here too), and `focal_dice` loss instead of the shipped `dice_bce` (both loss options were
+already in the source notebook, just never compared). 40 epochs, early stopping patience 8,
+~5 minutes/epoch. **Result: 0.6960 best validation Dice — very slightly worse than the
+shipped 640px/dice_bce checkpoint's 0.6970**, not better. Growth clearly plateaued by epoch
+27 (0.695) and never meaningfully improved after, even as the LR scheduler halved twice.
+The shipped checkpoint was kept; the new one was not adopted. `experiments/
+segformer_b2_history.csv` and `segformer_b2_config.json` are kept as a record of the
+attempt. Between this and the U-Net result above, resolution/loss-function tweaks and
+longer training runs have now twice failed to meaningfully beat what's already shipped —
+closing the remaining gap to a >0.73 target across this project would need a genuinely
+different approach (architecture, more/better data, or an ensemble), not further tuning of
+the current recipes.
 
 ### A correction worth being upfront about
 
@@ -255,8 +274,10 @@ work.
 │   ├── prepare_cache.py         # precomputes+caches GONGPreprocessor output
 │   ├── finalize_attention_unet.py  # one-off: threshold-sweep+finalize a checkpoint
 │   │                                #   without a live training run (see Results table)
-│   └── train_color_adapter.py   # trains models/color_adapter.py, self-supervised
-│                                  #   (synthetic re-colorization, see Results section)
+│   ├── train_color_adapter.py   # trains models/color_adapter.py, self-supervised
+│   │                              #   (synthetic re-colorization, see Results section)
+│   └── train_segformer_b2.py    # adapted from the notebook segformer_b2_best.pt was
+│                                  #   actually trained with (see Results section)
 ├── preprocessing/
 │   ├── solar_preprocessor.py    # disk detection, limb correction, CLAHE
 │   ├── dataset.py               # COCO parsing, PyTorch Dataset, .npy caching
@@ -378,9 +399,17 @@ python training/train.py configs/default_config.yaml
 ```
 
 The earlier MiT-B0 SegFormer run was trained via `notebooks/reference_segformer_02_training.ipynb`
-(HuggingFace `transformers`, not `train_smp.py`). The current `segformer_b2_best.pt` and
-`mask2former_phase3_768_best.pth` checkpoints arrived pre-trained with no accompanying
-training code — see their preprocessing/architecture caveats above.
+(HuggingFace `transformers`, not `train_smp.py`). `mask2former_phase3_768_best.pth` arrived
+pre-trained with no accompanying training code in this repo — see its architecture caveat
+above. `segformer_b2_best.pt`'s real training notebook (`notebooks/SegFormer_B2_Solar_Filament_
+Training.ipynb`) was found and adapted into `scripts/train_segformer_b2.py`:
+
+```bash
+python scripts/train_segformer_b2.py --epochs 40 --image_size 640 --loss dice_bce
+```
+
+(The shipped checkpoint used `--image_size 640 --loss dice_bce`; a retry at 768px/`focal_dice`
+landed slightly worse — see *A second honest result* above.)
 
 Both trainers write checkpoints to `checkpoints/` and print per-epoch Dice/IoU/loss.
 
