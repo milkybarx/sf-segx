@@ -106,11 +106,37 @@ def png_bytes(image: np.ndarray) -> bytes:
     return encoded.tobytes()
 
 
+@st.cache_resource(show_spinner=False)
+def load_sr_model(method: str, scale: int):
+    if method in ["OFF", "Lanczos (Current)", "Bicubic"]:
+        return None
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    from experiments.super_resolution.models import ESPCN, EDSRSmall, SolarSRNet
+    import os
+    if method == "ESPCN (AI-SR)":
+        model = ESPCN(scale_factor=scale, in_channels=1).to(device).eval()
+    elif method == "EDSR-Small (AI-SR)":
+        model = EDSRSmall(scale_factor=scale, in_channels=1).to(device).eval()
+    elif method == "Solar-SR (Trained AI-SR)":
+        model = SolarSRNet(scale_factor=scale, in_channels=1).to(device).eval()
+        ckpt_path = f"experiments/super_resolution/results/best_sr_model_solar_sr_x{scale}.pt"
+        if os.path.exists(ckpt_path):
+            ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+            model.load_state_dict(ckpt["model_state_dict"])
+    else:
+        return None
+    return model
+
+
 @st.cache_data(show_spinner=False)
-def cached_detail_upscale(crop: np.ndarray, scale: int) -> np.ndarray:
+def cached_detail_upscale(crop: np.ndarray, method: str, scale: int) -> np.ndarray:
     """Cache the selected filament's lightweight display-only enhancement."""
-    from visualization.detail import high_quality_upscale
-    return high_quality_upscale(crop, scale)
+    from visualization.detail import super_resolve_crop
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = load_sr_model(method, scale)
+    return super_resolve_crop(crop, method=method, scale=scale, model=model, device=device)
 
 
 @st.cache_data(ttl=5)
@@ -319,7 +345,9 @@ elif page == "Upload Image":
                 )
                 selected = filaments[selected_index]
                 detail_padding = st.slider("Crop padding (pixels)", 20, 50, 30, key="detail_padding")
-                detail_sr = st.checkbox("Enable Super Resolution", key="detail_super_resolution")
+                detail_sr_cols = st.columns([2, 1, 1])
+                detail_sr_method = detail_sr_cols[0].selectbox("Super Resolution", ["OFF", "Lanczos (Current)", "Bicubic", "ESPCN (AI-SR)", "EDSR-Small (AI-SR)", "Solar-SR (Trained AI-SR)"], key="detail_sr_method")
+                detail_sr_scale = detail_sr_cols[1].selectbox("Scale Factor", [2, 4], key="detail_sr_scale")
                 overlay_cols = st.columns(5)
                 show_detail_mask = overlay_cols[0].checkbox("Show segmentation mask", True, key="detail_mask")
                 show_detail_skeleton = overlay_cols[1].checkbox("Show skeleton", True, key="detail_skeleton")
@@ -328,7 +356,7 @@ elif page == "Upload Image":
                 show_detail_labels = overlay_cols[4].checkbox("Show labels", True, key="detail_labels")
 
                 detail_crop, crop_bounds = crop_filament(raw, selected, detail_padding)
-                enhanced_crop = cached_detail_upscale(detail_crop, 2) if detail_sr else None
+                enhanced_crop = cached_detail_upscale(detail_crop, detail_sr_method, detail_sr_scale) if detail_sr_method != "OFF" else None
                 detail_attribution = phase2_result["attribution"]
                 if show_detail_xai and detail_attribution is None:
                     if phase2_result["explainability_supported"]:
@@ -349,7 +377,7 @@ elif page == "Upload Image":
                 crop_cols = st.columns(2 if enhanced_crop is not None else 1)
                 crop_cols[0].image(detail_crop, caption="Original high-resolution crop", width='stretch')
                 if enhanced_crop is not None:
-                    crop_cols[1].image(enhanced_crop, caption="High-quality upscaled (display enhancement; no new information)", width='stretch')
+                    crop_cols[1].image(enhanced_crop, caption=f"AI Super-Resolution — Visualization Only ({detail_sr_scale}x)", width='stretch')
                 st.image(detail_overlay, caption="Selected filament detail overlays", width='stretch')
 
                 detail_info = {

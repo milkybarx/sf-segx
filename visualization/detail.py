@@ -11,21 +11,49 @@ def crop_filament(image: np.ndarray, filament: Dict, padding: int = 30):
     if padding < 0:
         raise ValueError("padding must be non-negative")
     bbox = filament["bbox"]
-    x0 = max(0, int(bbox["x_min"]) - padding)
-    y0 = max(0, int(bbox["y_min"]) - padding)
-    x1 = min(image.shape[1], int(bbox["x_max"]) + padding)
-    y1 = min(image.shape[0], int(bbox["y_max"]) + padding)
+    x_min = bbox.get("x_min", bbox.get("x", 0))
+    y_min = bbox.get("y_min", bbox.get("y", 0))
+    x_max = bbox.get("x_max", x_min + bbox.get("width", 0))
+    y_max = bbox.get("y_max", y_min + bbox.get("height", 0))
+    
+    x0 = max(0, int(x_min) - padding)
+    y0 = max(0, int(y_min) - padding)
+    x1 = min(image.shape[1], int(x_max) + padding)
+    y1 = min(image.shape[0], int(y_max) + padding)
     return image[y0:y1, x0:x1].copy(), (x0, y0, x1, y1)
 
 
-def high_quality_upscale(crop: np.ndarray, scale: int = 2) -> np.ndarray:
-    """Upscale with Lanczos interpolation; this does not create new science."""
+def super_resolve_crop(crop: np.ndarray, method: str = "Lanczos (Current)", scale: int = 2,
+                       model=None, device="cpu") -> np.ndarray:
+    """Upscale visualization crop with specified method (interpolation or AI-SR)."""
     if scale < 1:
         raise ValueError("scale must be positive")
-    if scale == 1:
+    if scale == 1 or method == "OFF":
         return crop.copy()
-    return cv2.resize(crop, (crop.shape[1] * scale, crop.shape[0] * scale),
-                      interpolation=cv2.INTER_LANCZOS4)
+    
+    if method in ["Lanczos (Current)", "Bicubic"]:
+        interp = cv2.INTER_LANCZOS4 if method == "Lanczos (Current)" else cv2.INTER_CUBIC
+        return cv2.resize(crop, (crop.shape[1] * scale, crop.shape[0] * scale), interpolation=interp)
+    
+    if model is not None:
+        import torch
+        with torch.inference_mode():
+            lr_float = crop.astype(np.float32) / 255.0
+            if lr_float.ndim == 2:
+                lr_tensor = torch.from_numpy(lr_float).unsqueeze(0).unsqueeze(0).to(device)
+            else:
+                lr_tensor = torch.from_numpy(lr_float).permute(2, 0, 1).unsqueeze(0).to(device)
+                
+            sr_tensor = model(lr_tensor)
+            sr_np = sr_tensor.squeeze().cpu().numpy()
+            
+            if sr_np.ndim == 3:
+                sr_np = sr_np.transpose(1, 2, 0)
+            
+            return (sr_np * 255.0).clip(0, 255).astype(np.uint8)
+            
+    # Fallback to Lanczos if AI model is not provided
+    return cv2.resize(crop, (crop.shape[1] * scale, crop.shape[0] * scale), interpolation=cv2.INTER_LANCZOS4)
 
 
 def selected_overlay(crop: np.ndarray, filament: Dict, labels: np.ndarray,
@@ -52,8 +80,13 @@ def selected_overlay(crop: np.ndarray, filament: Dict, labels: np.ndarray,
         display = cv2.addWeighted(display, 0.68, heat, 0.32, 0)
     local = dict(filament)
     bbox = filament["bbox"]
-    local["bbox"] = {"x_min": int(bbox["x_min"]) - x0, "y_min": int(bbox["y_min"]) - y0,
-                      "x_max": int(bbox["x_max"]) - x0, "y_max": int(bbox["y_max"]) - y0}
+    x_min = bbox.get("x_min", bbox.get("x", 0))
+    y_min = bbox.get("y_min", bbox.get("y", 0))
+    x_max = bbox.get("x_max", x_min + bbox.get("width", 0))
+    y_max = bbox.get("y_max", y_min + bbox.get("height", 0))
+    
+    local["bbox"] = {"x_min": int(x_min) - x0, "y_min": int(y_min) - y0,
+                     "x_max": int(x_max) - x0, "y_max": int(y_max) - y0}
     local["image_width"], local["image_height"] = display.shape[1], display.shape[0]
     if filament.get("skeleton_mask") is not None:
         local["skeleton_mask"] = filament["skeleton_mask"][y0:y1, x0:x1]

@@ -1,0 +1,41 @@
+Filament_ID,Method,Scale,Resolution,Laplacian_Sharpness,Tenengrad_Edge_Preservation,Latency_ms,Peak_VRAM_MB,Input_Resolution,Output_Resolution,PSNR_dB,SSIM,Category
+20110601063134Lh_f7,Original Crop (Reference),1,85x102,65.6,1274.3,0.0,0.0,,,,,
+20110601063134Lh_f7,Bicubic,2,,11.1,735.3,0.405,0.0,42x51,84x102,36.02,0.8941,Classical Interpolation
+20110601063134Lh_f7,Lanczos-4 (Current),2,,11.1,745.1,0.127,0.0,42x51,84x102,35.93,0.8919,Classical Interpolation
+20110601063134Lh_f7,Bicubic,4,,3.1,344.6,0.045,0.0,21x25,84x100,32.44,0.801,Classical Interpolation
+20110601063134Lh_f7,Lanczos-4 (Current),4,,3.1,358.3,0.096,0.0,21x25,84x100,32.41,0.8009,Classical Interpolation
+20120215153654Bh_f13,Original Crop (Reference),1,120x92,79.6,441.5,0.0,0.0,,,,,
+20120215153654Bh_f13,Bicubic,2,,22.5,541.4,0.056,0.0,60x46,120x92,35.84,0.8512,Classical Interpolation
+20120215153654Bh_f13,Lanczos-4 (Current),2,,25.5,621.2,0.119,0.0,60x46,120x92,35.56,0.8421,Classical Interpolation
+20120215153654Bh_f13,Bicubic,4,,1.8,56.6,0.058,0.0,30x23,120x92,37.35,0.8879,Classical Interpolation
+20120215153654Bh_f13,Lanczos-4 (Current),4,,1.7,56.1,0.103,0.0,30x23,120x92,37.32,0.8872,Classical Interpolation
+20120213063134Lh_f5,Original Crop (Reference),1,157x102,78.5,1962.3,0.0,0.0,,,,,
+20120213063134Lh_f5,Bicubic,2,,23.3,1553.9,0.148,0.0,78x51,156x102,34.71,0.8867,Classical Interpolation
+20120213063134Lh_f5,Lanczos-4 (Current),2,,23.4,1580.1,0.16,0.0,78x51,156x102,34.67,0.8853,Classical Interpolation
+20120213063134Lh_f5,Bicubic,4,,6.7,850.8,0.058,0.0,39x25,156x100,30.73,0.7612,Classical Interpolation
+20120213063134Lh_f5,Lanczos-4 (Current),4,,6.8,927.5,0.199,0.0,39x25,156x100,30.61,0.7579,Classical Interpolation
+20110601063134Lh_f3,Original Crop (Reference),1,95x153,72.7,1499.7,0.0,0.0,,,,,
+20110601063134Lh_f3,Bicubic,2,,15.4,905.4,0.048,0.0,47x76,94x152,34.39,0.8585,Classical Interpolation
+20110601063134Lh_f3,Lanczos-4 (Current),2,,15.6,928.6,0.148,0.0,47x76,94x152,34.3,0.8557,Classical Interpolation
+20110601063134Lh_f3,Bicubic,4,,4.5,569.8,0.054,0.0,23x38,92x152,31.0,0.7594,Classical Interpolation
+20110601063134Lh_f3,Lanczos-4 (Current),4,,4.5,607.9,0.138,0.0,23x38,92x152,30.91,0.7563,Classical Interpolation
+20120215153654Bh_f3,Original Crop (Reference),1,131x99,73.9,494.2,0.0,0.0,,,,,
+20120215153654Bh_f3,Bicubic,2,,9.3,375.1,0.044,0.0,65x49,130x98,36.11,0.8639,Classical Interpolation
+20120215153654Bh_f3,Lanczos-4 (Current),2,,9.7,399.6,0.139,0.0,65x49,130x98,36.01,0.8609,Classical Interpolation
+20120215153654Bh_f3,Bicubic,4,,2.3,177.4,0.055,0.0,32x24,128x96,35.36,0.872,Classical Interpolation
+20120215153654Bh_f3,Lanczos-4 (Current),4,,2.2,183.8,0.187,0.0,32x24,128x96,35.26,0.8695,Classical Interpolation
+20110601063134Lh_f4,Original Crop (Reference),1,200x174,68.6,1645.3,0.0,0.0,,,,,
+20110601063134Lh_f4,Bicubic,2,,12.2,998.9,0.088,0.0,100x87,200x174,36.8,0.9012,Classical Interpolation
+20110601063134Lh_f4,Lanczos-4 (Current),2,,11.7,997.5,0.289,0.0,100x87,200x174,36.75,0.9005,Classical Interpolation
+20110601063134Lh_f4,Bicubic,4,,7.5,991.7,0.091,0.0,50x43,200x172,32.08,0.7946,Classical Interpolation
+20110601063134Lh_f4,Lanczos-4 (Current),4,,7.7,1075.6,0.242,0.0,50x43,200x172,31.89,0.789,Classical Interpolation
+20120215153654Bh_f9,Original Crop (Reference),1,199x263,75.4,450.3,0.0,0.0,,,,,
+20120215153654Bh_f9,Bicubic,2,,22.1,521.4,0.103,0.0,99x131,198x262,35.61,0.8269,Classical Interpolation
+20120215153654Bh_f9,Lanczos-4 (Current),2,,25.1,596.5,0.508,0.0,99x131,198x262,35.32,0.8161,Classical Interpolation
+20120215153654Bh_f9,Bicubic,4,,1.8,77.3,0.111,0.0,49x65,196x260,36.5,0.8714,Classical Interpolation
+20120215153654Bh_f9,Lanczos-4 (Current),4,,1.8,77.9,0.436,0.0,49x65,196x260,36.47,0.871,Classical Interpolation
+20110601063134Lh_f1,Original Crop (Reference),1,295x298,72.2,958.6,0.0,0.0,,,,,
+20110601063134Lh_f1,Bicubic,2,,6.1,390.7,0.177,0.0,147x149,294x298,36.88,0.8909,Classical Interpolation
+20110601063134Lh_f1,Lanczos-4 (Current),2,,6.0,392.1,0.66,0.0,147x149,294x298,36.85,0.8902,Classical Interpolation
+20110601063134Lh_f1,Bicubic,4,,4.3,429.0,0.187,0.0,73x74,292x296,32.01,0.7654,Classical Interpolation
+20110601063134Lh_f1,Lanczos-4 (Current),4,,4.4,467.5,0.742,0.0,73x74,292x296,31.86,0.7603,Classical Interpolation
