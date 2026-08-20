@@ -285,6 +285,9 @@ def main():
 
     criterion = CompoundSolarLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, weight_decay=1e-4)
+    # A constant LR for the whole run leaves little room to fine-converge on longer runs --
+    # anneal towards a small floor instead, same pattern as this repo's other trained models.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
     print(f"Model built: {spec['label']}.")
 
@@ -312,6 +315,7 @@ def main():
 
         train_loss /= len(train_loader)
         train_dice /= len(train_loader)
+        scheduler.step()
 
         model.eval()
         val_loss, val_dice, val_iou = 0.0, 0.0, 0.0

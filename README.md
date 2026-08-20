@@ -93,6 +93,94 @@ in this repo (`checkpoints/*.pth`/`*.pt` not produced by `train_smp.py`) needed 
 training-time preprocessing and output convention reverse-engineered and verified against
 ground truth before being trusted, not assumed from what "should" work.
 
+### Color images — the color→H-alpha adapter
+
+Every model above was trained exclusively on MAGFiLO H-alpha imagery, which is genuinely
+single-channel (verified: every training JPEG has R==G==B exactly pixel-for-pixel, just
+saved as a 3-channel file). None of them have ever seen a real color image, and a naive
+grayscale conversion (`cv2.COLOR_BGR2GRAY`'s fixed 0.299R+0.587G+0.114B weighting) isn't
+guaranteed to preserve filament contrast for an arbitrarily color-graded or false-color
+input — a hue rotation can shift which channel actually carries the true luminance
+structure, silently degrading predictions without erroring.
+
+`models/color_adapter.py`'s `ColorToHAlphaNet` (a small U-Net, 3-channel RGB → 1-channel,
+264K params) fixes this as a shared preprocessing step ahead of every model, so none of them
+need retraining. There's no real color solar imagery anywhere in this repo or dataset to
+train it on directly, so `scripts/train_color_adapter.py` trains it **self-supervised**:
+take a real grayscale H-alpha training image, synthetically re-color it with a random
+hue/saturation/gamma transform (HSV recompose, `V` = the true grayscale so luminance
+structure is preserved, `H`/`S` randomized per example, 15% of examples left untouched as
+pure grayscale), and train the network to recover the original grayscale from the synthetic
+color version (L1 + a Sobel-gradient term for edge sharpness). A wide spread of random
+tints — not one fixed "look" — forces the network to learn a general *undo an unknown color
+cast* mapping instead of memorizing a specific color scheme, which is what lets it
+generalize to actually-unseen colored inputs at inference.
+
+`model_hub.run_inference()` calls `to_halpha_style()` on every input first: a genuinely
+colored image (channels differ) goes through the adapter; a grayscale or
+grayscale-stored-as-3-channel image (like this repo's own dataset, or the Validation
+Gallery) is detected and passed straight through unchanged, so nothing regresses for the
+existing use case.
+
+Trained for 40 epochs (cosine LR decay, val L1 = 0.0255 on held-out grayscale-vs-synthetic-
+color reconstruction) and verified end-to-end against real ground truth with two different
+synthetic color families — a global hue/saturation tint (HSV recompose) and an independent
+per-channel gain/bias transform (not part of the training augmentation, a harder
+generalization test) — run through the full `run_inference()` pipeline:
+
+| Model | True grayscale | Hue-tinted | Independent-channel |
+|---|---|---|---|
+| U-Net (ResNet-34) | 0.592 | 0.585 (−1%) | 0.592 (±0%) |
+| SegFormer (MiT-B2) | 0.575 | 0.572 (−1%) | 0.554 (−4%) |
+| Mask2Former (ResNet-34, 768px) | 0.679 | 0.549 (−19%) | 0.600 (−12%) |
+
+U-Net and SegFormer hold up close to their true-grayscale accuracy on both color families.
+Mask2Former shows a real, honest gap — it's the highest-resolution (768px) and highest-
+baseline-accuracy model here, so it depends the most on fine texture the adapter's
+grayscale reconstruction softens slightly; treat color-image predictions from it as
+noticeably less reliable than from the other two until the adapter (or a Mask2Former-
+specific fix) improves further.
+
+### Phase 2 analysis — instance separation, catalog export, super-resolution
+
+A second contributor (ET3RYX) built a scientific post-processing layer on top of the
+segmentation models, generalized here to work with every architecture in the Results table
+(not just one): `postprocessing/` (connected-component instance separation, skeleton
+analysis, spatial-region tagging, physical-unit calibration), `catalog/` (a validated
+JSON/CSV filament schema, exported per-image and per-filament from the Upload Image page),
+`explainability/interface.py` (a pluggable attribution hook, currently unsupported for the
+models registered here — see *Known limitations*), and `inference/adapters.py` (a
+model-agnostic `StandardizedPrediction` wrapper around `model_hub.run_inference()`, so the
+whole pipeline works for any registered model without per-architecture special-casing).
+`inference/phase2.run_phase2_analysis()` ties these together and is what the Upload Image
+page's "Filament Detail Inspector" runs.
+
+**Super-resolution** (`experiments/super_resolution/`): the Filament Detail Inspector's
+crop view is visualization-only (it never feeds back into scientific measurements — those
+are computed from the model's native-resolution output). Four lightweight architectures are
+available (ESPCN, FSRCNN, EDSR-Small, and a custom `Solar-SRNet`), trained with a physics-
+informed degradation pipeline (atmospheric-seeing blur, sensor noise, JPEG compression) on
+this repo's own bundled gallery images, using a Charbonnier + SSIM loss. Only Solar-SRNet
+(~460K params) is actually trained here — ESPCN/EDSR-Small are available as untrained
+architectures for comparison, exactly as documented in `experiments/super_resolution/
+sr_experiment_report.md`. Retrained in this session (checkpoints ship in `experiments/
+super_resolution/results/`): **35.60 dB PSNR / 0.90 SSIM at 2x**, **32.73 dB PSNR / 0.84
+SSIM at 4x** on held-out patches, both beating plain Lanczos-4 interpolation. Retrain with:
+
+```bash
+python experiments/super_resolution/training/train_sr.py --scale 2 --model solar_sr --epochs 20
+python experiments/super_resolution/training/train_sr.py --scale 4 --model solar_sr --epochs 20
+```
+
+Two real bugs were found and fixed while integrating this: `tests/test_phase2.py` imported
+a function (`high_quality_upscale`) that had been renamed to `super_resolve_crop` in the
+same commit that added AI super-resolution, and `postprocessing/instances.py` assumed every
+filament dict already carried a `component_id` key that `analysis/filament_morphology.
+analyze_filaments()` never actually set (fixed by adding it there). Both were silent
+failures — the first only surfaces when running the test suite, the second only when the
+Phase 2 pipeline runs at all, since Python doesn't catch a missing dict key until the line
+that reads it executes.
+
 ### MedSAM — attempted, not included
 
 A `03_MedSAM_Training.ipynb` was found alongside the SegFormer work, but its saved outputs
@@ -121,8 +209,10 @@ work.
 ├── scripts/
 │   ├── prepare_masks.py         # rasterizes COCO polygons -> per-image PNG masks
 │   ├── prepare_cache.py         # precomputes+caches GONGPreprocessor output
-│   └── finalize_attention_unet.py  # one-off: threshold-sweep+finalize a checkpoint
-│                                    #   without a live training run (see Results table)
+│   ├── finalize_attention_unet.py  # one-off: threshold-sweep+finalize a checkpoint
+│   │                                #   without a live training run (see Results table)
+│   └── train_color_adapter.py   # trains models/color_adapter.py, self-supervised
+│                                  #   (synthetic re-colorization, see Results section)
 ├── preprocessing/
 │   ├── solar_preprocessor.py    # disk detection, limb correction, CLAHE
 │   ├── dataset.py               # COCO parsing, PyTorch Dataset, .npy caching
@@ -131,7 +221,9 @@ work.
 │   ├── frangi.py, hessian.py, morphology.py, advanced_extractor.py
 ├── models/
 │   ├── unet.py                  # from-scratch U-Net
-│   └── mask2former.py           # from-scratch, lightweight Mask2Former
+│   ├── mask2former.py           # from-scratch/ResNet-34-backbone Mask2Former
+│   └── color_adapter.py         # ColorToHAlphaNet -- color image -> H-alpha style,
+│                                  #   shared by every model above (see Results section)
 ├── training/                    # original from-scratch trainer (U-Net / Mask2Former)
 │   ├── train.py, losses.py, metrics.py
 ├── train_smp.py                  # multi-architecture trainer (this session's addition):
@@ -152,7 +244,8 @@ work.
 │   ├── segformer_b2_best.pt     # 0.6970 Dice (fp16 on disk, ~55MB, see preprocessing caveat above)
 │   ├── unet_resnet34_best.pth   # 0.6611 Dice (fp16 on disk, ~46MB)
 │   ├── deeplabv3plus_resnet50_best.pth  # 0.6521 Dice (fp16 on disk, ~51MB)
-│   └── attention_unet_best.pth  # 0.6507 Dice (epoch 20/25, see caveat above)
+│   ├── attention_unet_best.pth  # 0.6507 Dice (epoch 20/25, see caveat above)
+│   └── color_to_halpha_adapter.pth  # color image -> H-alpha style, shared by all 5 above
 ├── experiments/
 │   ├── evaluate.py, generate_report.py, plot_results.py
 ├── outputs/
@@ -202,7 +295,8 @@ python scripts/prepare_cache.py   # precompute preprocessing cache (~3min, speed
 
 ### Checkpoints ship in the repo
 
-All 5 trained checkpoints are tracked in `checkpoints/` via **Git LFS** — `git lfs install`
+All 6 trained checkpoints (5 segmentation models + the color→H-alpha adapter) are tracked
+in `checkpoints/` via **Git LFS** — `git lfs install`
 once, then a normal `git clone`/`pull` transparently fetches the real weights instead of
 pointer files (GitHub's `git clone` UI and `git lfs env` both confirm this without any extra
 flags). Every checkpoint is stored with float16 weights and stripped of optimizer/scheduler
@@ -244,13 +338,21 @@ training code — see their preprocessing/architecture caveats above.
 
 Both trainers write checkpoints to `checkpoints/` and print per-epoch Dice/IoU/loss.
 
+The color→H-alpha adapter is trained separately (no ground-truth masks involved, just the
+raw training images):
+
+```bash
+python scripts/train_color_adapter.py --epochs 40 --batch_size 24
+```
+
 ## Dashboard
 
 One dashboard, `streamlit_app.py` — crimson theme, visual stats (Plotly Dice/loss curves +
 a model leaderboard chart, no raw per-epoch tables), model selector across every
 architecture in the Results table, a validation gallery with shuffle, and upload-your-own
-image/video evaluation. Built on `model_hub.py` so there's one model registry, one
-inference path, no logic duplicated across UIs.
+image/video evaluation — color images included, via the color→H-alpha adapter (see Results
+section). Built on `model_hub.py` so there's one model registry, one inference path, no
+logic duplicated across UIs.
 
 ```bash
 streamlit run streamlit_app.py

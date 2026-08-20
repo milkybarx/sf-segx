@@ -1,0 +1,12 @@
+{
+  "model_name": "solar_sr",
+  "scale_factor": 2,
+  "epochs": 20,
+  "batch_size": 16,
+  "lr": 0.0005,
+  "patch_size": 96,
+  "total_params": 377137,
+  "best_val_psnr": 35.60282373459706,
+  "best_val_ssim": 0.9007,
+  "training_time_seconds": 57.19
+}

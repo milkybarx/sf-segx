@@ -8,9 +8,13 @@ Design: crimson accent theme (.streamlit/config.toml), visual stats (Plotly
 charts + metric cards) instead of raw per-epoch number tables, using
 streamlit-extras for polished metric cards / section headers.
 """
+import csv
+import io
+import json
 import os
 import sys
 import tempfile
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -68,6 +72,74 @@ def confidence_rgb(probs: np.ndarray) -> np.ndarray:
     return (np.stack([r, g, b], axis=-1) * 255).astype(np.uint8)
 
 
+def png_bytes(image: np.ndarray) -> bytes:
+    """Encode an image for a Streamlit download without changing its resolution."""
+    value = cv2.cvtColor(image, cv2.COLOR_RGB2BGR) if image.ndim == 3 else image
+    ok, encoded = cv2.imencode(".png", value)
+    if not ok:
+        raise ValueError("Could not encode image as PNG")
+    return encoded.tobytes()
+
+
+def morphology_table_rows(filaments):
+    """Return Arrow-compatible scalar rows without internal NumPy masks."""
+    rows = []
+    for filament in filaments:
+        centroid = filament.get("centroid", {})
+        rows.append({
+            "Filament ID": filament.get("filament_id", 0),
+            "Confidence": round(float(filament.get("confidence", 0.0)), 3),
+            "Area (px)": round(float(filament.get("area_px", 0.0)), 2),
+            "Perimeter (px)": round(float(filament.get("perimeter_px", 0.0)), 2),
+            "Skeleton length (px)": round(float(filament.get("skeleton_length_px", 0.0)), 2),
+            "Average width (px)": round(float(filament.get("avg_width_px", 0.0)), 2),
+            "Sinuosity": round(float(filament.get("sinuosity", 1.0)), 3),
+            "Orientation (deg)": round(float(filament.get("orientation_deg", 0.0)), 2),
+            "Centroid X": round(float(centroid.get("x", 0.0)), 2),
+            "Centroid Y": round(float(centroid.get("y", 0.0)), 2),
+            "Spatial region": filament.get("spatial_region", "CENTER"),
+            "Risk indicator": filament.get("risk_screening_indicator", "LOW"),
+        })
+    return rows
+
+
+@st.cache_resource(show_spinner=False)
+def load_sr_model(method: str, scale: int):
+    """Loads (and caches) the super-resolution model for the Filament Detail Inspector.
+    Trained checkpoints (checkpoints via experiments/super_resolution/training/train_sr.py)
+    are used when present; ESPCN/EDSR-Small fall back to untrained weights (see
+    sr_experiment_report.md -- only Solar-SR was actually trained on this data)."""
+    if method in ["OFF", "Lanczos (Current)", "Bicubic"]:
+        return None
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    from experiments.super_resolution.models import ESPCN, EDSRSmall, SolarSRNet
+    if method == "ESPCN (AI-SR)":
+        model = ESPCN(scale_factor=scale, in_channels=1).to(device).eval()
+    elif method == "EDSR-Small (AI-SR)":
+        model = EDSRSmall(scale_factor=scale, in_channels=1).to(device).eval()
+    elif method == "Solar-SR (Trained AI-SR)":
+        model = SolarSRNet(scale_factor=scale, in_channels=1).to(device).eval()
+        ckpt_path = os.path.join(hub.ROOT, "experiments", "super_resolution", "results",
+                                  f"best_sr_model_solar_sr_x{scale}.pt")
+        if os.path.exists(ckpt_path):
+            ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+            model.load_state_dict(ckpt["model_state_dict"])
+    else:
+        return None
+    return model
+
+
+@st.cache_data(show_spinner=False)
+def cached_detail_upscale(crop: np.ndarray, method: str, scale: int) -> np.ndarray:
+    """Cache the selected filament's lightweight display-only enhancement."""
+    from visualization.detail import super_resolve_crop
+    import torch
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = load_sr_model(method, scale)
+    return super_resolve_crop(crop, method=method, scale=scale, model=model, device=device)
+
+
 @st.cache_data(ttl=5)
 def cached_model_list():
     return hub.list_models()
@@ -96,6 +168,8 @@ arch = st.sidebar.selectbox(
     "Model", options=list(labels.keys()), format_func=lambda a: labels[a],
     index=list(labels.keys()).index(default_arch),
 )
+phase2_threshold = st.sidebar.slider("Segmentation threshold (Upload Image)", 0.20, 0.75, 0.50, 0.01)
+show_explainability = st.sidebar.checkbox("Explainability (when supported)", value=False)
 
 page = st.sidebar.radio("View", ["Overview", "Validation Gallery", "Upload Image", "Upload Video"])
 
@@ -225,20 +299,32 @@ elif page == "Upload Image":
     st.header("Upload & Evaluate an Image", divider="red")
     st.caption(labels[arch])
 
-    uploaded = st.file_uploader("H-alpha solar image", type=["jpg", "jpeg", "png"])
+    uploaded = st.file_uploader("H-alpha solar image (grayscale or color)", type=["jpg", "jpeg", "png"])
     if uploaded is not None:
         data = np.frombuffer(uploaded.read(), dtype=np.uint8)
-        raw = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)
-        if raw is None:
+        raw_color = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        if raw_color is None:
             st.error("Could not decode that image.")
         else:
-            status = cached_status(arch)
-            best_thresh = status["best_threshold"]["threshold"] if status.get("best_threshold") else 0.5
-            with st.spinner("Running segmentation..."):
-                small, disk_small, probs, pred = hub.run_inference(raw, arch, best_thresh)
+            # Converted to H-alpha style once, up front -- everything below (Phase 2
+            # analysis, instance panels, the detail-crop inspector, super-resolution)
+            # then works on a single real grayscale image regardless of whether the
+            # upload was color or already grayscale. A genuinely colored image goes
+            # through model_hub's color->H-alpha adapter; a grayscale source round-trips
+            # unchanged either way.
+            raw = hub.to_halpha_style(raw_color)
 
-            from analysis.filament_morphology import analyze_filaments
-            filaments = analyze_filaments(pred, probs, min_area=40)
+            from inference.phase2 import run_phase2_analysis
+            with st.spinner("Running segmentation and Phase 2 analysis..."):
+                phase2_result = run_phase2_analysis(
+                    raw, image_id=uploaded.name, model_name=arch,
+                    threshold=phase2_threshold, explain=show_explainability,
+                )
+            phase2_inference = phase2_result["inference"]
+            small = phase2_inference.preprocessed
+            probs = cv2.resize(phase2_inference.probability, (small.shape[1], small.shape[0]))
+            pred = cv2.resize(phase2_inference.mask, (small.shape[1], small.shape[0]), interpolation=cv2.INTER_NEAREST)
+            filaments = phase2_result["filaments"]
 
             c1, c2, c3 = st.columns(3)
             c1.metric("Filaments Detected", len(filaments))
@@ -250,6 +336,27 @@ elif page == "Upload Image":
             cols[0].image(small, caption="Preprocessed Input", width='stretch')
             cols[1].image(overlay_rgb(small, pred, color=(220, 20, 60)), caption="Predicted Filaments", width='stretch')
             cols[2].image(confidence_rgb(probs), caption="Confidence Heatmap", width='stretch')
+
+            from visualization.phase2 import _instance_panel, create_phase2_figure
+            from visualization.detail import crop_filament, detail_record, save_detail_artifacts, selected_overlay
+            st.caption(f"Phase 2 model: {phase2_result['model_name']} · threshold {phase2_result['threshold']:.2f}")
+            annotated_panel = _instance_panel(raw, filaments)
+            skeleton_panel = _instance_panel(raw, filaments, skeleton=True)
+            with st.expander("View high-resolution visualization", expanded=True):
+                st.image(annotated_panel, caption="Instances with green bounding boxes", width='stretch')
+                st.image(skeleton_panel, caption="One-pixel cyan skeletons", width='stretch')
+            figure = create_phase2_figure(small, probs, pred, filaments, phase2_result["attribution"])
+            st.pyplot(figure, clear_figure=True)
+            st.download_button("Download JSON catalog", json.dumps(phase2_result["catalog"], indent=2),
+                               file_name="filament_catalog.json", mime="application/json")
+            csv_buffer = io.StringIO()
+            writer = csv.DictWriter(csv_buffer, fieldnames=["image_id", "model_name", "model_checkpoint", "threshold",
+                                                              "filament_id", "confidence", "area_px",
+                                                              "skeleton_length_px", "sinuosity", "orientation_deg",
+                                                              "spatial_region"])
+            writer.writeheader()
+            writer.writerows({key: record.get(key) for key in writer.fieldnames} for record in phase2_result["catalog"])
+            st.download_button("Download CSV catalog", csv_buffer.getvalue(), file_name="filament_catalog.csv", mime="text/csv")
 
             if filaments:
                 fig = go.Figure(go.Bar(
@@ -265,7 +372,103 @@ elif page == "Upload Image":
                 )
                 st.plotly_chart(fig, width='stretch')
                 with st.expander("Per-filament measurements"):
-                    st.dataframe(filaments, width='stretch')
+                    st.dataframe(morphology_table_rows(filaments), width='stretch')
+
+                st.divider()
+                st.subheader("Filament Detail Inspector")
+                selected_index = st.selectbox(
+                    "Filament", options=list(range(len(filaments))),
+                    format_func=lambda index: f"Filament #{filaments[index]['filament_id']}",
+                    key="detail_filament",
+                )
+                selected = filaments[selected_index]
+                detail_padding = st.slider("Crop padding (pixels)", 20, 50, 30, key="detail_padding")
+                detail_sr_cols = st.columns([2, 1, 1])
+                detail_sr_method = detail_sr_cols[0].selectbox(
+                    "Super Resolution",
+                    ["OFF", "Lanczos (Current)", "Bicubic", "ESPCN (AI-SR)", "EDSR-Small (AI-SR)", "Solar-SR (Trained AI-SR)"],
+                    key="detail_sr_method",
+                )
+                detail_sr_scale = detail_sr_cols[1].selectbox("Scale Factor", [2, 4], key="detail_sr_scale")
+                overlay_cols = st.columns(5)
+                show_detail_mask = overlay_cols[0].checkbox("Show segmentation mask", True, key="detail_mask")
+                show_detail_skeleton = overlay_cols[1].checkbox("Show skeleton", True, key="detail_skeleton")
+                show_detail_bbox = overlay_cols[2].checkbox("Show bounding box", True, key="detail_bbox")
+                show_detail_xai = overlay_cols[3].checkbox("Show attribution / XAI", False, key="detail_xai")
+                show_detail_labels = overlay_cols[4].checkbox("Show labels", True, key="detail_labels")
+
+                detail_crop, crop_bounds = crop_filament(raw, selected, detail_padding)
+                enhanced_crop = cached_detail_upscale(detail_crop, detail_sr_method, detail_sr_scale) if detail_sr_method != "OFF" else None
+                detail_attribution = phase2_result["attribution"]
+                if show_detail_xai and detail_attribution is None:
+                    if phase2_result["explainability_supported"]:
+                        from explainability.interface import generate_explanation
+                        detail_model, _ = hub.get_model(arch)
+                        with st.spinner("Computing selected-image attribution..."):
+                            detail_attribution = generate_explanation(detail_model, raw, phase2_inference, arch)
+                    else:
+                        st.info("Explainability is not currently supported for this model.")
+                detail_overlay = selected_overlay(
+                    detail_crop, selected, phase2_result["labels"], crop_bounds,
+                    show_mask=show_detail_mask, show_skeleton=show_detail_skeleton,
+                    show_bbox=show_detail_bbox, show_labels=show_detail_labels,
+                    attribution=detail_attribution, show_attribution=show_detail_xai,
+                )
+                crop_cols = st.columns(2 if enhanced_crop is not None else 1)
+                crop_cols[0].image(detail_crop, caption="Original high-resolution crop", width='stretch')
+                if enhanced_crop is not None:
+                    crop_cols[1].image(enhanced_crop, caption=f"AI Super-Resolution — Visualization Only ({detail_sr_scale}x)", width='stretch')
+                st.image(detail_overlay, caption="Selected filament detail overlays", width='stretch')
+
+                detail_info = {
+                    "Filament ID": f"#{selected['filament_id']}",
+                    "Confidence": round(float(selected.get("confidence", 0.0)), 3),
+                    "Area (px)": round(float(selected.get("area_px", 0.0)), 2),
+                    "Perimeter (px)": round(float(selected.get("perimeter_px", 0.0)), 2),
+                    "Skeleton length (px)": round(float(selected.get("skeleton_length_px", 0.0)), 2),
+                    "Average width (px)": round(float(selected.get("avg_width_px", 0.0)), 2),
+                    "Sinuosity": round(float(selected.get("sinuosity", 1.0)), 3),
+                    "Orientation / tilt (deg)": round(float(selected.get("orientation_deg", 0.0)), 2),
+                    "Centroid X": round(float(selected["centroid"].get("x", 0.0)), 2),
+                    "Centroid Y": round(float(selected["centroid"].get("y", 0.0)), 2),
+                    "Bounding box": json.dumps(selected.get("bbox", {})),
+                    "Spatial region": selected.get("spatial_region", "CENTER"),
+                    "Risk indicator": selected.get("risk_screening_indicator", "LOW"),
+                }
+                physical = selected.get("physical", {})
+                if physical.get("calibrated"):
+                    detail_info["Length (km)"] = round(float(physical["length_km"]), 2)
+                    detail_info["Area (km²)"] = round(float(physical["area_km2"]), 2)
+                st.dataframe([detail_info], hide_index=True, width='stretch')
+
+                selected_catalog = phase2_result["catalog"][selected_index]
+                json_data = json.dumps(selected_catalog, indent=2)
+                csv_row = dict(selected_catalog)
+                for key in ("centroid", "bbox", "physical"):
+                    csv_row[key] = json.dumps(csv_row[key])
+                detail_csv = io.StringIO()
+                csv_writer = csv.DictWriter(detail_csv, fieldnames=list(csv_row.keys()))
+                csv_writer.writeheader()
+                csv_writer.writerow(csv_row)
+                export_cols = st.columns(4)
+                export_cols[0].download_button("Export Filament JSON", json_data,
+                                               file_name=f"filament_{selected['filament_id']:03d}.json",
+                                               mime="application/json")
+                export_cols[1].download_button("Export Filament CSV", detail_csv.getvalue(),
+                                               file_name=f"filament_{selected['filament_id']:03d}.csv",
+                                               mime="text/csv")
+                export_cols[2].download_button("Download Original Crop", png_bytes(detail_crop),
+                                               file_name=f"filament_{selected['filament_id']:03d}_original.png",
+                                               mime="image/png")
+                if enhanced_crop is not None:
+                    export_cols[3].download_button("Download Enhanced Crop", png_bytes(enhanced_crop),
+                                                   file_name=f"filament_{selected['filament_id']:03d}_upscaled.png",
+                                                   mime="image/png")
+                if st.button("Save Filament Detail", key="save_detail"):
+                    detail_dir = Path("outputs") / "filaments" / Path(uploaded.name).stem
+                    save_detail_artifacts(detail_dir, detail_crop, enhanced_crop, detail_overlay, selected)
+                    saved_filament_dir = detail_dir / f"filament_{int(selected['filament_id']):03d}"
+                    st.success(f"Saved detail artifacts to {saved_filament_dir}")
     else:
         st.info("Upload an H-alpha image to run segmentation.")
 
@@ -301,8 +504,9 @@ elif page == "Upload Video":
                     ok, frame = cap.read()
                     if not ok:
                         continue
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    small, disk_small, probs, pred = hub.run_inference(gray, arch, best_thresh)
+                    # frame is BGR (color) -- hub.run_inference() handles color->H-alpha
+                    # conversion itself, same as the Upload Image path.
+                    small, disk_small, probs, pred = hub.run_inference(frame, arch, best_thresh)
                     cols[i % 3].image(
                         overlay_rgb(small, pred, color=(220, 20, 60)),
                         caption=f"Frame {int(fi)}", width='stretch',

@@ -30,3 +30,6 @@ tqdm==4.67.1
 streamlit==1.61.1
 streamlit-extras==1.6.0
 plotly==6.3.0
+# visualization/phase2.py's create_phase2_figure() (Upload Image page's Phase 2 panel) uses
+# matplotlib directly -- required at runtime, not just for training/notebooks.
+matplotlib==3.10.6

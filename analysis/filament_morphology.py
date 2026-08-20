@@ -38,6 +38,7 @@ def analyze_filaments(mask: np.ndarray, probability_map: np.ndarray = None,
         props = measure_filament_properties(mask, component_mask, probability_map)
         if props:
             props['filament_id'] = len(filaments) + 1
+            props['component_id'] = comp_id
             filaments.append(props)
 
     # Sort by area (largest first)

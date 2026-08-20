@@ -19,6 +19,13 @@ Two families of models are exposed under one interface:
         scores near-zero Dice), and feeding CLAHE/limb-corrected GONGPreprocessor output
         instead of a plain resize measurably hurts Dice, i.e. wrong preprocessing silently
         produces a working-looking but badly wrong model.
+
+Color input: every model above was trained exclusively on single-channel H-alpha imagery.
+run_inference() calls to_halpha_style() on every raw_img first -- a truly colored input is
+converted to H-alpha style by models/color_adapter.py's ColorToHAlphaNet (checkpoints/
+color_to_halpha_adapter.pth) before reaching any model-specific preprocessing, so every
+architecture above gets color-image support without being retrained itself. A grayscale (or
+grayscale-stored-as-3-channel, like this repo's own dataset) input passes straight through.
 """
 import csv
 import glob
@@ -99,6 +106,9 @@ infer_tf = A.Compose([
 _models = {}          # arch -> (torch.nn.Module, checkpoint_mtime)
 _sample_paths_cache = {}
 _ext_preprocessor = None
+_color_adapter = None
+COLOR_ADAPTER_CKPT = os.path.join(ROOT, "checkpoints", "color_to_halpha_adapter.pth")
+COLOR_ADAPTER_RES = 512
 
 
 def log_path_for(arch: str) -> str:
@@ -201,6 +211,57 @@ def get_ext_preprocessor():
         from preprocessing.solar_preprocessor import SolarPreprocessor
         _ext_preprocessor = SolarPreprocessor(target_size=DISPLAY_SIZE)
     return _ext_preprocessor
+
+
+def _is_true_grayscale(img: np.ndarray, tol: int = 2) -> bool:
+    """MAGFiLO's own JPEGs are single-channel content saved as 3-channel files (R==G==B
+    exactly) -- cheap to detect and skip the color adapter entirely for those."""
+    if img.ndim == 2:
+        return True
+    b, g, r = img[..., 0].astype(np.int16), img[..., 1].astype(np.int16), img[..., 2].astype(np.int16)
+    return bool(np.abs(r - g).max() <= tol and np.abs(g - b).max() <= tol)
+
+
+def get_color_adapter():
+    """Lazily loads models/color_adapter.py's ColorToHAlphaNet. Returns None if no
+    checkpoint has been trained yet (scripts/train_color_adapter.py) -- callers fall back
+    to plain grayscale conversion in that case, never crash."""
+    global _color_adapter
+    if _color_adapter is None and os.path.exists(COLOR_ADAPTER_CKPT):
+        from models.color_adapter import build_color_adapter
+        ckpt = torch.load(COLOR_ADAPTER_CKPT, map_location=device, weights_only=False)
+        m = build_color_adapter(base=ckpt.get("config", {}).get("base", 24))
+        state = {k: v.float() for k, v in ckpt["model_state_dict"].items()}
+        m.load_state_dict(state)
+        m.eval()
+        _color_adapter = m
+    return _color_adapter
+
+
+def to_halpha_style(raw_img: np.ndarray) -> np.ndarray:
+    """Every model in this repo was trained exclusively on genuinely single-channel H-alpha
+    imagery (see models/color_adapter.py docstring). A truly colored input is run through
+    the trained color->H-alpha adapter so every existing model can use it unmodified; a
+    grayscale/near-grayscale input (incl. this repo's own dataset, stored as 3-channel
+    files with R==G==B) passes straight through as before."""
+    if _is_true_grayscale(raw_img):
+        return raw_img if raw_img.ndim == 2 else cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
+
+    adapter = get_color_adapter()
+    if adapter is None:
+        # No trained adapter available -- fall back to a plain (imperfect) conversion
+        # rather than crashing.
+        return cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
+
+    h, w = raw_img.shape[:2]
+    res = COLOR_ADAPTER_RES
+    small = cv2.resize(raw_img, (res, res), interpolation=cv2.INTER_AREA)
+    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+    inp = torch.from_numpy(rgb.transpose(2, 0, 1)).unsqueeze(0).float()
+    with torch.no_grad():
+        out = adapter(inp).squeeze().numpy()
+    out_u8 = np.clip(out * 255.0, 0, 255).astype(np.uint8)
+    return cv2.resize(out_u8, (w, h), interpolation=cv2.INTER_LINEAR)
 
 
 # --------------------------------------------------------------------------------------
@@ -374,7 +435,13 @@ def list_models():
 # pipeline -- feeding the wrong preprocessing/normalization into that checkpoint would
 # silently produce garbage predictions, so inference branches on which pipeline trained it.
 def run_inference(raw_img: np.ndarray, arch: str, best_thresh: float):
-    """Returns (display_image_uint8, disk_mask_bool, prob_map_float, pred_mask_uint8), all at DISPLAY_SIZE."""
+    """Returns (display_image_uint8, disk_mask_bool, prob_map_float, pred_mask_uint8), all at DISPLAY_SIZE.
+
+    raw_img may be single-channel grayscale OR a 3-channel color image (BGR, as from
+    cv2.imread/cv2.imdecode/cv2.VideoCapture) -- a genuinely colored input is converted to
+    H-alpha style via to_halpha_style() before any model-specific preprocessing runs, so
+    every architecture below gets color support without being retrained itself."""
+    raw_img = to_halpha_style(raw_img)
     model, _ = get_model(arch)
 
     if arch in EXTERNAL_MODELS and EXTERNAL_MODELS[arch]["kind"] == "segformer":
