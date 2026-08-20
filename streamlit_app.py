@@ -215,6 +215,7 @@ if page == "Overview":
             title="Dice Score over Training", height=340, template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h", y=1.1),
+            xaxis=dict(showgrid=False), yaxis=dict(showgrid=False),
         )
         st.plotly_chart(fig, width='stretch')
 
@@ -227,6 +228,7 @@ if page == "Overview":
             title="Loss over Training", height=300, template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=10, r=10, t=40, b=10), legend=dict(orientation="h", y=1.1),
+            xaxis=dict(showgrid=False), yaxis=dict(showgrid=False),
         )
         st.plotly_chart(fig2, width='stretch')
     elif final_metrics:
@@ -257,7 +259,8 @@ if page == "Overview":
         fig3.update_layout(
             height=90 + 60 * len(trained), template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=10, r=40, t=10, b=10), xaxis_title="Best Validation Dice",
+            margin=dict(l=10, r=40, t=10, b=10),
+            xaxis=dict(title="Best Validation Dice", showgrid=False), yaxis=dict(showgrid=False),
         )
         st.plotly_chart(fig3, width='stretch')
 
@@ -400,7 +403,8 @@ elif page == "Upload Image":
                     title="Filament Length by ID", height=280, template="plotly_dark",
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                     margin=dict(l=10, r=10, t=40, b=10),
-                    xaxis_title="Filament ID", yaxis_title="Skeleton Length (px)",
+                    xaxis=dict(title="Filament ID", showgrid=False),
+                    yaxis=dict(title="Skeleton Length (px)", showgrid=False),
                 )
                 st.plotly_chart(fig, width='stretch')
                 with st.expander("Per-filament measurements"):
