@@ -243,7 +243,17 @@ def to_halpha_style(raw_img: np.ndarray) -> np.ndarray:
     imagery (see models/color_adapter.py docstring). A truly colored input is run through
     the trained color->H-alpha adapter so every existing model can use it unmodified; a
     grayscale/near-grayscale input (incl. this repo's own dataset, stored as 3-channel
-    files with R==G==B) passes straight through as before."""
+    files with R==G==B) passes straight through as before.
+
+    Runs the adapter at a fixed COLOR_ADAPTER_RES (512) regardless of the calling model's
+    own resolution. Tried making this per-model (768 for Mask2Former, matching its own
+    working resolution) on the theory that a fixed 512px pass was discarding detail
+    Mask2Former needs -- measured it against real ground truth and it made Mask2Former's
+    colored-input Dice *worse* (0.523 vs 0.549 hue-tinted), not better: the adapter was
+    trained on 320px crops, and running it at 768px pushes it further from that training
+    distribution than 512px does, which hurt more than any resolution-matching helped.
+    Reverted; Mask2Former remains the one model with a real (documented) accuracy gap on
+    colored input, per the Results section."""
     if _is_true_grayscale(raw_img):
         return raw_img if raw_img.ndim == 2 else cv2.cvtColor(raw_img, cv2.COLOR_BGR2GRAY)
 
