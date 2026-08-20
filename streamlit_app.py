@@ -332,10 +332,15 @@ elif page == "Upload Image":
             c3.metric("Avg Confidence", f"{np.mean([f['confidence'] for f in filaments]):.2f}" if filaments else "—")
             style_metric_cards(border_left_color=CRIMSON)
 
-            cols = st.columns(3)
-            cols[0].image(small, caption="Preprocessed Input", width='stretch')
-            cols[1].image(overlay_rgb(small, pred, color=(220, 20, 60)), caption="Predicted Filaments", width='stretch')
-            cols[2].image(confidence_rgb(probs), caption="Confidence Heatmap", width='stretch')
+            original_display = cv2.cvtColor(
+                cv2.resize(raw_color, (small.shape[1], small.shape[0]), interpolation=cv2.INTER_AREA),
+                cv2.COLOR_BGR2RGB,
+            )
+            cols = st.columns(4)
+            cols[0].image(original_display, caption="Original Upload", width='stretch')
+            cols[1].image(small, caption="Preprocessed Input (H-alpha style)", width='stretch')
+            cols[2].image(overlay_rgb(small, pred, color=(220, 20, 60)), caption="Predicted Filaments", width='stretch')
+            cols[3].image(confidence_rgb(probs), caption="Confidence Heatmap", width='stretch')
 
             from visualization.phase2 import _instance_panel, create_phase2_figure
             from visualization.detail import crop_filament, detail_record, save_detail_artifacts, selected_overlay
@@ -345,7 +350,7 @@ elif page == "Upload Image":
             with st.expander("View high-resolution visualization", expanded=True):
                 st.image(annotated_panel, caption="Instances with green bounding boxes", width='stretch')
                 st.image(skeleton_panel, caption="One-pixel cyan skeletons", width='stretch')
-            figure = create_phase2_figure(small, probs, pred, filaments, phase2_result["attribution"])
+            figure = create_phase2_figure(original_display, probs, pred, filaments, phase2_result["attribution"])
             st.pyplot(figure, clear_figure=True)
             st.download_button("Download JSON catalog", json.dumps(phase2_result["catalog"], indent=2),
                                file_name="filament_catalog.json", mime="application/json")
