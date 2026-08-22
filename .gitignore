@@ -14,3 +14,4 @@ __pycache__/
 # Scratch
 scratch_*
 .claude/
+.DS_Store
