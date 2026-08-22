@@ -73,6 +73,23 @@ EXTERNAL_MODELS = {
         "resolution": 1024,
         "best_threshold": 0.5,
     },
+    "mask2former_phase2_hybrid": {
+        "label": "Mask2Former (ResNet-34 backbone, dice+focal+boundary loss, 512px)",
+        "kind": "mask2former",
+        "checkpoint": os.path.join(ROOT, "checkpoints", "mask2former_phase2_hybrid_512_best.pth"),
+        "resolution": 512,
+        "best_threshold": 0.5,
+        # Self-reported at training time (its own val split); independently re-measured
+        # via this repo's real inference pipeline on an 80-image sample of the gallery
+        # set and confirmed as a genuine improvement over mask2former_phase3_768
+        # (0.7173 vs 0.6919 real measured mean Dice) before being added here.
+        "final_metrics": {
+            "epoch": 49, "total_epochs": 50,
+            "val_loss": 0.19984761522761707, "val_dice": 0.7248574258952305,
+            "val_iou": 0.5722777781815365, "val_precision": 0.7237881098327965,
+            "val_recall": 0.7350614394607216,
+        },
+    },
     "mask2former_phase3": {
         "label": "Mask2Former (ResNet-34 backbone, 768px)",
         "kind": "mask2former",
