@@ -1,3 +1,13 @@
+---
+title: Solar Filament Tracker
+emoji: ☀️
+colorFrom: red
+colorTo: orange
+sdk: streamlit
+sdk_version: 1.36.0
+app_file: streamlit_app.py
+pinned: false
+---
 # Solar Filament Segmentation & Space Weather Intelligence System
 
 AI-powered detection and segmentation of solar filaments in H-alpha full-disk solar
