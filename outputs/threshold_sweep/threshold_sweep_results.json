@@ -1,0 +1,105 @@
+{
+  "checkpoint": "checkpoints/phase2_hybrid_loss_dice0.7249.pth",
+  "optimal_threshold": 0.46,
+  "peak_val_dice": 0.7190677503212085,
+  "sweep_data": [
+    {
+      "threshold": 0.24,
+      "val_dice": 0.7177,
+      "val_iou": 0.5793,
+      "recall": 0.7651,
+      "precision": 0.7044
+    },
+    {
+      "threshold": 0.26,
+      "val_dice": 0.7179,
+      "val_iou": 0.5796,
+      "recall": 0.7641,
+      "precision": 0.7061
+    },
+    {
+      "threshold": 0.28,
+      "val_dice": 0.718,
+      "val_iou": 0.5796,
+      "recall": 0.763,
+      "precision": 0.7071
+    },
+    {
+      "threshold": 0.3,
+      "val_dice": 0.7181,
+      "val_iou": 0.5799,
+      "recall": 0.7622,
+      "precision": 0.7083
+    },
+    {
+      "threshold": 0.32,
+      "val_dice": 0.7183,
+      "val_iou": 0.5801,
+      "recall": 0.7611,
+      "precision": 0.7096
+    },
+    {
+      "threshold": 0.34,
+      "val_dice": 0.7184,
+      "val_iou": 0.5802,
+      "recall": 0.7604,
+      "precision": 0.7106
+    },
+    {
+      "threshold": 0.36,
+      "val_dice": 0.7186,
+      "val_iou": 0.5804,
+      "recall": 0.7597,
+      "precision": 0.7115
+    },
+    {
+      "threshold": 0.38,
+      "val_dice": 0.7186,
+      "val_iou": 0.5806,
+      "recall": 0.7587,
+      "precision": 0.7127
+    },
+    {
+      "threshold": 0.4,
+      "val_dice": 0.7188,
+      "val_iou": 0.5808,
+      "recall": 0.7581,
+      "precision": 0.7136
+    },
+    {
+      "threshold": 0.42,
+      "val_dice": 0.7189,
+      "val_iou": 0.581,
+      "recall": 0.7572,
+      "precision": 0.7147
+    },
+    {
+      "threshold": 0.44,
+      "val_dice": 0.7189,
+      "val_iou": 0.581,
+      "recall": 0.7564,
+      "precision": 0.7155
+    },
+    {
+      "threshold": 0.46,
+      "val_dice": 0.7191,
+      "val_iou": 0.5812,
+      "recall": 0.7556,
+      "precision": 0.7165
+    },
+    {
+      "threshold": 0.48,
+      "val_dice": 0.719,
+      "val_iou": 0.5812,
+      "recall": 0.7548,
+      "precision": 0.7172
+    },
+    {
+      "threshold": 0.5,
+      "val_dice": 0.719,
+      "val_iou": 0.5812,
+      "recall": 0.7541,
+      "precision": 0.7179
+    }
+  ]
+}

@@ -36,6 +36,7 @@ from space_weather.visualizer import generate_parker_spiral_plot
 from space_weather.cme_drag_model import CMEDragModel
 from reports.pdf_generator import generate_space_weather_pdf
 from inference.ensemble_stacker import TriModelEnsembleStacker
+from analysis.telemetry_exporter import export_filament_telemetry_csv
 
 # Global instances
 predictor_instances = {}
@@ -86,6 +87,7 @@ def run_full_inference(image: np.ndarray, model_choice: str, colormap_choice: st
             blank_spiral, # Parker spiral diagram
             "### ⚠️ No Image Active\nPlease upload a full-disk solar observation image.", # Space weather risk card
             "outputs/reports/Space_Weather_Alert_Bulletin.pdf", # PDF path
+            "outputs/reports/filament_telemetry.csv", # CSV path
             "Please upload a full-disk solar observation image.", # Score & Morphology text
             "No active image.", # Tech report
             gr.update(choices=["No Filaments Detected"], value="No Filaments Detected") # Dropdown
@@ -266,6 +268,7 @@ def run_full_inference(image: np.ndarray, model_choice: str, colormap_choice: st
         )
 
         # Generate official PDF bulletin
+        # Generate official PDF bulletin & Calibrated Telemetry CSV
         pdf_path = generate_space_weather_pdf({
             'timestamp': datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
             'filament_loc': f"{lat_str} {lon_str} (Stonyhurst)",
@@ -288,6 +291,12 @@ def run_full_inference(image: np.ndarray, model_choice: str, colormap_choice: st
             'critical_sats': [s['satellite_name'] for s in critical_sats[:6]] if critical_sats else [s['satellite_name'] for s in sat_risks[:6]],
             'eva_directive': "SUSPEND ALL EXTRAVEHICULAR ACTIVITIES (EVAs) & COMMAND CREW SHELTER" if critical_sats else "STANDARD SPACE ENVIRONMENT PROCEDURES MAINTAINED"
         })
+
+        csv_path = export_filament_telemetry_csv(
+            filaments_list=res.get('filaments_list', []),
+            downstream_risk=eruption_res,
+            cme_data=cme_res
+        )
     else:
         parker_plot_rgb = generate_parker_spiral_plot(flare_lon_deg=60.0, flare_lat_deg=15.0, flare_class="C1.0")
         space_weather_card = (
@@ -295,6 +304,7 @@ def run_full_inference(image: np.ndarray, model_choice: str, colormap_choice: st
             "*No prominent filaments detected on the solar disk to analyze.*"
         )
         pdf_path = "outputs/reports/Space_Weather_Alert_Bulletin.pdf"
+        csv_path = "outputs/reports/filament_telemetry.csv"
 
     # Score and full morphology report
     score_and_morphology_text = res['score_breakdown']
@@ -332,6 +342,7 @@ def run_full_inference(image: np.ndarray, model_choice: str, colormap_choice: st
         parker_plot_rgb,
         space_weather_card,
         pdf_path,
+        csv_path,
         score_and_morphology_text, tech_report,
         gr.update(choices=choices, value=default_val)
     )
@@ -615,7 +626,9 @@ def create_dashboard():
                         out_parker_spiral = gr.Image(label="🌌 Parker Spiral Magnetic Connectivity & Satellite Fleet Exposure Diagram", interactive=False)
                     with gr.Column(scale=1):
                         out_space_weather_card = gr.Markdown("### 🛰️ Space Weather Telemetry\nUpload and scan an image to compute eruption probability, hydrodynamic CME transit & satellite exposure.")
-                        out_pdf_btn = gr.DownloadButton("📄 Download Official Space Weather Event Bulletin (PDF)", value="outputs/reports/Space_Weather_Alert_Bulletin.pdf", size="lg", variant="primary")
+                        with gr.Row():
+                            out_pdf_btn = gr.DownloadButton("📄 Download Official Space Weather Bulletin (PDF)", value="outputs/reports/Space_Weather_Alert_Bulletin.pdf", size="lg", variant="primary")
+                            out_csv_btn = gr.DownloadButton("📊 Download Calibrated Filament Telemetry (CSV)", value="outputs/reports/filament_telemetry.csv", size="lg", variant="secondary")
 
                 gr.Markdown("### 5️⃣ Quantitative Morphology & Structural Score")
                 with gr.Row():
@@ -632,6 +645,7 @@ def create_dashboard():
                         out_parker_spiral,
                         out_space_weather_card,
                         out_pdf_btn,
+                        out_csv_btn,
                         out_score_card, out_tech_report,
                         filament_select_dropdown
                     ]

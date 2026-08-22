@@ -277,7 +277,7 @@ class Mask2Former(nn.Module):
     def __init__(
         self,
         in_channels: int = 1,
-        num_queries: int = 20,
+        num_queries: int = 25,
         hidden_dim: int = 128,
         num_decoder_layers: int = 3,
         nheads: int = 8,

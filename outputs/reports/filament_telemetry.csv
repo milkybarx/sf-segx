@@ -1,0 +1,7 @@
+Filament_ID,Heliographic_Lat,Heliographic_Lon,Spine_Length_km,Surface_Area_km2,Magnetic_Shear_deg,Contrast_Dip,Eruption_Prob_24h_pct,Eruption_Prob_48h_pct,Projected_Flare_Class,CME_Arrival_Speed_kms,CME_Transit_Hours,NOAA_Storm_Scale,Kp_Index,Timestamp_UTC
+FILAMENT_001,N15.0°,W45.0°,72500.0,6.26e+08,45.0,0.35,2.3,4.6,Sub-flaring / Quiescent Background,479.6,81.9,G1 (Minor),5.0,2026-08-21 21:49:15
+FILAMENT_002,N15.0°,W45.0°,72500.0,2.77e+08,45.0,0.35,2.3,4.6,Sub-flaring / Quiescent Background,479.6,81.9,G1 (Minor),5.0,2026-08-21 21:49:15
+FILAMENT_003,N15.0°,W45.0°,72500.0,9.46e+07,45.0,0.35,2.3,4.6,Sub-flaring / Quiescent Background,479.6,81.9,G1 (Minor),5.0,2026-08-21 21:49:15
+FILAMENT_004,N15.0°,W45.0°,72500.0,7.31e+07,45.0,0.35,2.3,4.6,Sub-flaring / Quiescent Background,479.6,81.9,G1 (Minor),5.0,2026-08-21 21:49:15
+FILAMENT_005,N15.0°,W45.0°,72500.0,6.25e+07,45.0,0.35,2.3,4.6,Sub-flaring / Quiescent Background,479.6,81.9,G1 (Minor),5.0,2026-08-21 21:49:15
+FILAMENT_006,N15.0°,W45.0°,72500.0,5.94e+07,45.0,0.35,2.3,4.6,Sub-flaring / Quiescent Background,479.6,81.9,G1 (Minor),5.0,2026-08-21 21:49:15
