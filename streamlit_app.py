@@ -321,279 +321,302 @@ elif page == "Upload Image":
     with upload_container:
         st.markdown("<h3 style='text-align: center;'>🚀 Drop a Solar H-Alpha Image Here</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: gray;'>Upload a grayscale or color image to detect filaments and measure eruption risk.</p>", unsafe_allow_html=True)
-        uploaded = st.file_uploader(" ", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
+        
+        sample_dir = Path("sample_images")
+        sample_images = []
+        if sample_dir.exists():
+            sample_images = sorted([f.name for f in sample_dir.glob("*") if f.suffix.lower() in [".jpg", ".jpeg", ".png"]])
+            
+        selected_sample = None
+        if sample_images:
+            st.markdown("<p style='text-align: center; font-weight: bold;'>Quick Access (Click to Select)</p>", unsafe_allow_html=True)
+            # Create columns for thumbnails (up to 5 in a row to avoid squishing too much)
+            num_cols = min(len(sample_images), 5)
+            cols = st.columns(num_cols)
+            for i, img_name in enumerate(sample_images):
+                with cols[i % num_cols]:
+                    st.image(str(sample_dir / img_name), use_container_width=True)
+                    if st.button(f"Select", key=f"btn_{img_name}", use_container_width=True):
+                        st.session_state.selected_sample = img_name
+            
+            if "selected_sample" in st.session_state:
+                selected_sample = st.session_state.selected_sample
+                
+        uploaded = st.file_uploader("Or upload your own image:", type=["jpg", "jpeg", "png"])
+
+    raw_color = None
+    file_name = None
+    
     if uploaded is not None:
         data = np.frombuffer(uploaded.read(), dtype=np.uint8)
         raw_color = cv2.imdecode(data, cv2.IMREAD_COLOR)
-        if raw_color is None:
-            st.error("Could not decode that image.")
-        else:
-            # Converted to H-alpha style once, up front -- everything below (Phase 2
-            # analysis, instance panels, the detail-crop inspector, super-resolution)
-            # then works on a single real grayscale image regardless of whether the
-            # upload was color or already grayscale. A genuinely colored image goes
-            # through model_hub's color->H-alpha adapter; a grayscale source round-trips
-            # unchanged either way.
-            raw = hub.to_halpha_style(raw_color)
+        file_name = uploaded.name
+    elif selected_sample is not None:
+        raw_color = cv2.imread(str(sample_dir / selected_sample), cv2.IMREAD_COLOR)
+        file_name = selected_sample
 
-            from inference.phase2 import run_phase2_analysis
-            with st.spinner("Running segmentation and Phase 2 analysis..."):
-                phase2_result = run_phase2_analysis(
-                    raw, image_id=uploaded.name, model_name=arch,
-                    threshold=phase2_threshold, explain=show_explainability,
-                )
-            phase2_inference = phase2_result["inference"]
-            small = phase2_inference.preprocessed
-            probs = cv2.resize(phase2_inference.probability, (small.shape[1], small.shape[0]))
-            pred = cv2.resize(phase2_inference.mask, (small.shape[1], small.shape[0]), interpolation=cv2.INTER_NEAREST)
-            filaments = phase2_result["filaments"]
+    if raw_color is not None:
+        raw = hub.to_halpha_style(raw_color)
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Filaments Detected", len(filaments))
-            c2.metric("Total Area (px)", f"{sum(f['area_px'] for f in filaments):,.0f}" if filaments else "0")
-            c3.metric("Avg Confidence", f"{np.mean([f['confidence'] for f in filaments]):.2f}" if filaments else "—")
-            style_metric_cards(border_left_color=CRIMSON)
-
-            original_display = cv2.cvtColor(
-                cv2.resize(raw_color, (small.shape[1], small.shape[0]), interpolation=cv2.INTER_AREA),
-                cv2.COLOR_BGR2RGB,
+        from inference.phase2 import run_phase2_analysis
+        with st.spinner("Running segmentation and Phase 2 analysis..."):
+            phase2_result = run_phase2_analysis(
+                raw, image_id=file_name, model_name=arch,
+                threshold=phase2_threshold, explain=show_explainability,
             )
-            cols = st.columns(4)
-            cols[0].image(original_display, caption="Original Upload", width='stretch')
-            cols[1].image(small, caption="Preprocessed Input (H-alpha style)", width='stretch')
-            cols[2].image(overlay_rgb(small, pred, color=(220, 20, 60)), caption="Predicted Filaments", width='stretch')
-            cols[3].image(confidence_rgb(probs), caption="Confidence Heatmap", width='stretch')
+            
+        phase2_inference = phase2_result["inference"]
+        small = phase2_inference.preprocessed
+        probs = cv2.resize(phase2_inference.probability, (small.shape[1], small.shape[0]))
+        pred = cv2.resize(phase2_inference.mask, (small.shape[1], small.shape[0]), interpolation=cv2.INTER_NEAREST)
+        filaments = phase2_result["filaments"]
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Filaments Detected", len(filaments))
+        c2.metric("Total Area (px)", f"{sum(f['area_px'] for f in filaments):,.0f}" if filaments else "0")
+        c3.metric("Avg Confidence", f"{np.mean([f['confidence'] for f in filaments]):.2f}" if filaments else "—")
+        style_metric_cards(border_left_color=CRIMSON)
+
+        original_display = cv2.cvtColor(
+            cv2.resize(raw_color, (small.shape[1], small.shape[0]), interpolation=cv2.INTER_AREA),
+            cv2.COLOR_BGR2RGB,
+        )
+        cols = st.columns(4)
+        cols[0].image(original_display, caption="Original Upload", width='stretch')
+        cols[1].image(small, caption="Preprocessed Input (H-alpha style)", width='stretch')
+        cols[2].image(overlay_rgb(small, pred, color=(220, 20, 60)), caption="Predicted Filaments", width='stretch')
+        cols[3].image(confidence_rgb(probs), caption="Confidence Heatmap", width='stretch')
+
+        st.divider()
+        run_ensemble = st.checkbox(
+            "Run Ensemble Consensus & Uncertainty (all 5 models + test-time augmentation — slower)",
+            value=False, key="run_ensemble",
+        )
+        if run_ensemble:
+            from inference.ensemble import run_ensemble_inference
+            with st.spinner("Running all 5 models with test-time augmentation..."):
+                ens_small, ens_disk, ens_probs, ens_mask, ens_weights, agreement = run_ensemble_inference(raw)
+            st.markdown("#### Ensemble Consensus & Uncertainty")
+            st.caption(
+                "Weighted-averaged prediction across every trained model (weights: "
+                + ", ".join(f"{a} {w:.3f}" for a, w in ens_weights.items())
+                + f") with test-time augmentation. Measured honestly: this does not "
+                "always beat the single best model's raw Dice — its real value is the "
+                "agreement map, which flags where independently-architected models "
+                "disagree (a signal a single model's own confidence score can't give you)."
+            )
+            ecols = st.columns(3)
+            ecols[0].image(overlay_rgb(ens_small, ens_mask, color=(220, 20, 60)),
+                           caption="Ensemble Prediction", width='stretch')
+            ecols[1].image(confidence_rgb(ens_probs), caption="Ensemble Confidence", width='stretch')
+            agreement_heat = (np.clip(1.0 - agreement, 0, 1) * 255).astype(np.uint8)
+            agreement_rgb = cv2.applyColorMap(agreement_heat, cv2.COLORMAP_HOT)
+            agreement_rgb = cv2.cvtColor(agreement_rgb, cv2.COLOR_BGR2RGB)
+            ecols[2].image(agreement_rgb, caption="Model Disagreement (bright = models conflict)", width='stretch')
+
+        from visualization.phase2 import _instance_panel, create_phase2_figure
+        from visualization.detail import crop_filament, detail_record, save_detail_artifacts, selected_overlay
+        st.caption(f"Phase 2 model: {phase2_result['model_name']} · threshold {phase2_result['threshold']:.2f}")
+        annotated_panel = _instance_panel(raw, filaments)
+        skeleton_panel = _instance_panel(raw, filaments, skeleton=True)
+        with st.expander("View high-resolution visualization", expanded=True):
+            st.image(annotated_panel, caption="Instances with green bounding boxes", width='stretch')
+            st.image(skeleton_panel, caption="One-pixel cyan skeletons", width='stretch')
+        figure = create_phase2_figure(original_display, probs, pred, filaments, phase2_result["attribution"])
+        st.pyplot(figure, clear_figure=True)
+        st.markdown("#### Export Results")
+        export_cols = st.columns(2)
+        export_cols[0].download_button("Download JSON catalog", json.dumps(phase2_result["catalog"], indent=2),
+                           file_name="filament_catalog.json", mime="application/json", use_container_width=True)
+        csv_buffer = io.StringIO()
+        writer = csv.DictWriter(csv_buffer, fieldnames=["image_id", "model_name", "model_checkpoint", "threshold",
+                                                          "filament_id", "confidence", "area_px",
+                                                          "skeleton_length_px", "sinuosity", "orientation_deg",
+                                                          "spatial_region"])
+        writer.writeheader()
+        writer.writerows({key: record.get(key) for key in writer.fieldnames} for record in phase2_result["catalog"])
+        export_cols[1].download_button("Download CSV catalog", csv_buffer.getvalue(), file_name="filament_catalog.csv", mime="text/csv", use_container_width=True)
+
+        if filaments:
+            fig = go.Figure(go.Bar(
+                x=[f["filament_id"] for f in filaments],
+                y=[f["skeleton_length_px"] for f in filaments],
+                marker=dict(color=CRIMSON),
+            ))
+            fig.update_layout(
+                title="Filament Length by ID", height=280, template="plotly_dark",
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=10, r=10, t=40, b=10),
+                xaxis=dict(title="Filament ID", showgrid=False),
+                yaxis=dict(title="Skeleton Length (px)", showgrid=False),
+            )
+            st.plotly_chart(fig, width='stretch')
+            with st.expander("Per-filament measurements"):
+                st.dataframe(morphology_table_rows(filaments), width='stretch')
 
             st.divider()
-            run_ensemble = st.checkbox(
-                "Run Ensemble Consensus & Uncertainty (all 5 models + test-time augmentation — slower)",
-                value=False, key="run_ensemble",
+            st.subheader("Space Weather: Flare Prediction", divider="orange")
+            st.caption("Uses the trained Random Forest model (flare_rf_model.pkl) to predict 24h eruption risk based on filament geometry.")
+            from analysis.flare_prediction import calculate_flare_probability
+            
+            display_count = min(len(filaments), 4)
+            risk_cols = st.columns(display_count) if display_count > 0 else []
+            
+            for i, f in enumerate(filaments[:display_count]):
+                mocked_distance = float(np.random.uniform(10.0, 100.0))
+                risk = calculate_flare_probability(
+                    length_px=f.get('skeleton_length_px', 0.0),
+                    distance_to_sunspot=mocked_distance,
+                    region_type=f.get('spatial_region', 'ARF')
+                )
+                
+                risk_cols[i].metric(
+                    f"Filament #{f['filament_id']}", 
+                    f"{risk:.1%}", 
+                    delta="HIGH RISK" if risk > 0.5 else "LOW RISK",
+                    delta_color="inverse"
+                )
+            if len(filaments) > 4:
+                st.info(f"Showing risk for the top 4 filaments (out of {len(filaments)} detected).")
+            
+            st.divider()
+            st.subheader("🌍 CME Earth Impact Trajectory", divider="red")
+            st.caption("Estimates the path of a potential Coronal Mass Ejection based on the filament's position. Filaments near the center of the solar disk are more likely to be Earth-directed.")
+            
+            center_x = raw.shape[1] / 2.0
+            best_idx = 0
+            min_dist = float('inf')
+            for i, f in enumerate(filaments):
+                dist = abs(f.get("centroid", {}).get("x", 0) - center_x)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_idx = i
+            
+            traj_filament_index = st.selectbox(
+                "Select a filament to view its potential eruption trajectory:", 
+                options=list(range(len(filaments))),
+                index=best_idx,
+                format_func=lambda index: f"Filament #{filaments[index]['filament_id']}",
+                key="traj_filament"
             )
-            if run_ensemble:
-                from inference.ensemble import run_ensemble_inference
-                with st.spinner("Running all 5 models with test-time augmentation..."):
-                    ens_small, ens_disk, ens_probs, ens_mask, ens_weights, agreement = run_ensemble_inference(raw)
-                st.markdown("#### Ensemble Consensus & Uncertainty")
-                st.caption(
-                    "Weighted-averaged prediction across every trained model (weights: "
-                    + ", ".join(f"{a} {w:.3f}" for a, w in ens_weights.items())
-                    + f") with test-time augmentation. Measured honestly: this does not "
-                    "always beat the single best model's raw Dice — its real value is the "
-                    "agreement map, which flags where independently-architected models "
-                    "disagree (a signal a single model's own confidence score can't give you)."
-                )
-                ecols = st.columns(3)
-                ecols[0].image(overlay_rgb(ens_small, ens_mask, color=(220, 20, 60)),
-                               caption="Ensemble Prediction", width='stretch')
-                ecols[1].image(confidence_rgb(ens_probs), caption="Ensemble Confidence", width='stretch')
-                agreement_heat = (np.clip(1.0 - agreement, 0, 1) * 255).astype(np.uint8)
-                agreement_rgb = cv2.applyColorMap(agreement_heat, cv2.COLORMAP_HOT)
-                agreement_rgb = cv2.cvtColor(agreement_rgb, cv2.COLOR_BGR2RGB)
-                ecols[2].image(agreement_rgb, caption="Model Disagreement (bright = models conflict)", width='stretch')
+            
+            from visualization.three_d_trajectory import plot_3d_trajectory
+            with st.spinner("Rendering 3D solar environment and orbital trajectory..."):
+                fig_traj, is_impact = plot_3d_trajectory(raw, pred, filaments[traj_filament_index])
+                st.plotly_chart(fig_traj, use_container_width=True)
+                
+            if is_impact:
+                st.error("⚠️ **WARNING:** An eruption from this filament would likely hit Earth, potentially causing a geomagnetic storm.")
+            else:
+                st.success("✅ **SAFE:** An eruption from this filament is not Earth-directed.")
+            
+            with st.expander("How is this calculated?"):
+                st.markdown("""
+                **1. 3D Sun Mapping**  
+                The 2D solar image is mathematically wrapped around a 3D sphere. The center of the 2D image corresponds to the point on the Sun facing directly at Earth (Longitude 0°, Latitude 0°).
+                
+                **2. Eruption Vector**  
+                When a filament erupts, we assume it travels radially outward from the Sun's surface. We calculate its exact 3D vector based on its X/Y pixel coordinates. A filament near the equator (center) points at Earth, while one near the poles points "up" or "down" into space.
+                
+                **3. Earth Impact Detection (Accounting for Orbital Velocity)**  
+                A Coronal Mass Ejection takes roughly 15 hours to 3 days to reach Earth. Because Earth orbits the Sun at ~0.986 degrees per day, it will have moved by the time the CME arrives! We calculate Earth's future position 2 days ahead, and check the angle between the CME's eruption vector and Earth's *future* orbital position. If the angle is less than 25° (a 50° wide cone), it triggers a Geomagnetic Storm Warning!
+                """)
+            
+            st.divider()
+            st.subheader("Filament Detail Inspector")
+            selected_index = st.selectbox(
+                "Filament", options=list(range(len(filaments))),
+                format_func=lambda index: f"Filament #{filaments[index]['filament_id']}",
+                key="detail_filament",
+            )
+            selected = filaments[selected_index]
+            detail_padding = st.slider("Crop padding (pixels)", 20, 50, 30, key="detail_padding")
+            detail_sr_cols = st.columns([2, 1, 1])
+            detail_sr_method = detail_sr_cols[0].selectbox(
+                "Super Resolution",
+                ["OFF", "Lanczos (Current)", "Bicubic", "ESPCN (AI-SR)", "EDSR-Small (AI-SR)", "Solar-SR (Trained AI-SR)"],
+                key="detail_sr_method",
+            )
+            detail_sr_scale = detail_sr_cols[1].selectbox("Scale Factor", [2, 4], key="detail_sr_scale")
+            overlay_cols = st.columns(5)
+            show_detail_mask = overlay_cols[0].checkbox("Show segmentation mask", True, key="detail_mask")
+            show_detail_skeleton = overlay_cols[1].checkbox("Show skeleton", True, key="detail_skeleton")
+            show_detail_bbox = overlay_cols[2].checkbox("Show bounding box", True, key="detail_bbox")
+            show_detail_xai = overlay_cols[3].checkbox("Show attribution / XAI", False, key="detail_xai")
+            show_detail_labels = overlay_cols[4].checkbox("Show labels", True, key="detail_labels")
 
-            from visualization.phase2 import _instance_panel, create_phase2_figure
-            from visualization.detail import crop_filament, detail_record, save_detail_artifacts, selected_overlay
-            st.caption(f"Phase 2 model: {phase2_result['model_name']} · threshold {phase2_result['threshold']:.2f}")
-            annotated_panel = _instance_panel(raw, filaments)
-            skeleton_panel = _instance_panel(raw, filaments, skeleton=True)
-            with st.expander("View high-resolution visualization", expanded=True):
-                st.image(annotated_panel, caption="Instances with green bounding boxes", width='stretch')
-                st.image(skeleton_panel, caption="One-pixel cyan skeletons", width='stretch')
-            figure = create_phase2_figure(original_display, probs, pred, filaments, phase2_result["attribution"])
-            st.pyplot(figure, clear_figure=True)
-            st.markdown("#### Export Results")
-            export_cols = st.columns(2)
-            export_cols[0].download_button("Download JSON catalog", json.dumps(phase2_result["catalog"], indent=2),
-                               file_name="filament_catalog.json", mime="application/json", use_container_width=True)
-            csv_buffer = io.StringIO()
-            writer = csv.DictWriter(csv_buffer, fieldnames=["image_id", "model_name", "model_checkpoint", "threshold",
-                                                              "filament_id", "confidence", "area_px",
-                                                              "skeleton_length_px", "sinuosity", "orientation_deg",
-                                                              "spatial_region"])
-            writer.writeheader()
-            writer.writerows({key: record.get(key) for key in writer.fieldnames} for record in phase2_result["catalog"])
-            export_cols[1].download_button("Download CSV catalog", csv_buffer.getvalue(), file_name="filament_catalog.csv", mime="text/csv", use_container_width=True)
-
-            if filaments:
-                fig = go.Figure(go.Bar(
-                    x=[f["filament_id"] for f in filaments],
-                    y=[f["skeleton_length_px"] for f in filaments],
-                    marker=dict(color=CRIMSON),
-                ))
-                fig.update_layout(
-                    title="Filament Length by ID", height=280, template="plotly_dark",
-                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    margin=dict(l=10, r=10, t=40, b=10),
-                    xaxis=dict(title="Filament ID", showgrid=False),
-                    yaxis=dict(title="Skeleton Length (px)", showgrid=False),
-                )
-                st.plotly_chart(fig, width='stretch')
-                with st.expander("Per-filament measurements"):
-                    st.dataframe(morphology_table_rows(filaments), width='stretch')
-
-                st.divider()
-                st.subheader("Space Weather: Flare Prediction", divider="orange")
-                st.caption("Uses the trained Random Forest model (flare_rf_model.pkl) to predict 24h eruption risk based on filament geometry.")
-                from analysis.flare_prediction import calculate_flare_probability
-                
-                display_count = min(len(filaments), 4)
-                risk_cols = st.columns(display_count) if display_count > 0 else []
-                
-                for i, f in enumerate(filaments[:display_count]):
-                    mocked_distance = float(np.random.uniform(10.0, 100.0))
-                    risk = calculate_flare_probability(
-                        length_px=f.get('skeleton_length_px', 0.0),
-                        distance_to_sunspot=mocked_distance,
-                        region_type=f.get('spatial_region', 'ARF')
-                    )
-                    
-                    risk_cols[i].metric(
-                        f"Filament #{f['filament_id']}", 
-                        f"{risk:.1%}", 
-                        delta="HIGH RISK" if risk > 0.5 else "LOW RISK",
-                        delta_color="inverse"
-                    )
-                if len(filaments) > 4:
-                    st.info(f"Showing risk for the top 4 filaments (out of {len(filaments)} detected).")
-                
-                st.divider()
-                st.subheader("🌍 CME Earth Impact Trajectory", divider="red")
-                st.caption("Estimates the path of a potential Coronal Mass Ejection based on the filament's position. Filaments near the center of the solar disk are more likely to be Earth-directed.")
-                
-                center_x = raw.shape[1] / 2.0
-                best_idx = 0
-                min_dist = float('inf')
-                for i, f in enumerate(filaments):
-                    dist = abs(f.get("centroid", {}).get("x", 0) - center_x)
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_idx = i
-                
-                traj_filament_index = st.selectbox(
-                    "Select a filament to view its potential eruption trajectory:", 
-                    options=list(range(len(filaments))),
-                    index=best_idx,
-                    format_func=lambda index: f"Filament #{filaments[index]['filament_id']}",
-                    key="traj_filament"
-                )
-                
-                from visualization.three_d_trajectory import plot_3d_trajectory
-                with st.spinner("Rendering 3D solar environment and orbital trajectory..."):
-                    fig_traj, is_impact = plot_3d_trajectory(raw, pred, filaments[traj_filament_index])
-                    st.plotly_chart(fig_traj, use_container_width=True)
-                    
-                if is_impact:
-                    st.error("⚠️ **WARNING:** An eruption from this filament would likely hit Earth, potentially causing a geomagnetic storm.")
+            detail_crop, crop_bounds = crop_filament(raw, selected, detail_padding)
+            enhanced_crop = cached_detail_upscale(detail_crop, detail_sr_method, detail_sr_scale) if detail_sr_method != "OFF" else None
+            detail_attribution = phase2_result["attribution"]
+            if show_detail_xai and detail_attribution is None:
+                if phase2_result["explainability_supported"]:
+                    from explainability.interface import generate_explanation
+                    detail_model, _ = hub.get_model(arch)
+                    with st.spinner("Computing selected-image attribution..."):
+                        detail_attribution = generate_explanation(detail_model, raw, phase2_inference, arch)
                 else:
-                    st.success("✅ **SAFE:** An eruption from this filament is not Earth-directed.")
-                
-                with st.expander("How is this calculated?"):
-                    st.markdown("""
-                    **1. 3D Sun Mapping**  
-                    The 2D solar image is mathematically wrapped around a 3D sphere. The center of the 2D image corresponds to the point on the Sun facing directly at Earth (Longitude 0°, Latitude 0°).
-                    
-                    **2. Eruption Vector**  
-                    When a filament erupts, we assume it travels radially outward from the Sun's surface. We calculate its exact 3D vector based on its X/Y pixel coordinates. A filament near the equator (center) points at Earth, while one near the poles points "up" or "down" into space.
-                    
-                    **3. Earth Impact Detection (Accounting for Orbital Velocity)**  
-                    A Coronal Mass Ejection takes roughly 15 hours to 3 days to reach Earth. Because Earth orbits the Sun at ~0.986 degrees per day, it will have moved by the time the CME arrives! We calculate Earth's future position 2 days ahead, and check the angle between the CME's eruption vector and Earth's *future* orbital position. If the angle is less than 25° (a 50° wide cone), it triggers a Geomagnetic Storm Warning!
-                    """)
-                
-                st.divider()
-                st.subheader("Filament Detail Inspector")
-                selected_index = st.selectbox(
-                    "Filament", options=list(range(len(filaments))),
-                    format_func=lambda index: f"Filament #{filaments[index]['filament_id']}",
-                    key="detail_filament",
-                )
-                selected = filaments[selected_index]
-                detail_padding = st.slider("Crop padding (pixels)", 20, 50, 30, key="detail_padding")
-                detail_sr_cols = st.columns([2, 1, 1])
-                detail_sr_method = detail_sr_cols[0].selectbox(
-                    "Super Resolution",
-                    ["OFF", "Lanczos (Current)", "Bicubic", "ESPCN (AI-SR)", "EDSR-Small (AI-SR)", "Solar-SR (Trained AI-SR)"],
-                    key="detail_sr_method",
-                )
-                detail_sr_scale = detail_sr_cols[1].selectbox("Scale Factor", [2, 4], key="detail_sr_scale")
-                overlay_cols = st.columns(5)
-                show_detail_mask = overlay_cols[0].checkbox("Show segmentation mask", True, key="detail_mask")
-                show_detail_skeleton = overlay_cols[1].checkbox("Show skeleton", True, key="detail_skeleton")
-                show_detail_bbox = overlay_cols[2].checkbox("Show bounding box", True, key="detail_bbox")
-                show_detail_xai = overlay_cols[3].checkbox("Show attribution / XAI", False, key="detail_xai")
-                show_detail_labels = overlay_cols[4].checkbox("Show labels", True, key="detail_labels")
+                    st.info("Explainability is not currently supported for this model.")
+            detail_overlay = selected_overlay(
+                detail_crop, selected, phase2_result["labels"], crop_bounds,
+                show_mask=show_detail_mask, show_skeleton=show_detail_skeleton,
+                show_bbox=show_detail_bbox, show_labels=show_detail_labels,
+                attribution=detail_attribution, show_attribution=show_detail_xai,
+            )
+            crop_cols = st.columns(2 if enhanced_crop is not None else 1)
+            crop_cols[0].image(detail_crop, caption="Original high-resolution crop", width='stretch')
+            if enhanced_crop is not None:
+                crop_cols[1].image(enhanced_crop, caption=f"AI Super-Resolution — Visualization Only ({detail_sr_scale}x)", width='stretch')
+            st.image(detail_overlay, caption="Selected filament detail overlays", width='stretch')
 
-                detail_crop, crop_bounds = crop_filament(raw, selected, detail_padding)
-                enhanced_crop = cached_detail_upscale(detail_crop, detail_sr_method, detail_sr_scale) if detail_sr_method != "OFF" else None
-                detail_attribution = phase2_result["attribution"]
-                if show_detail_xai and detail_attribution is None:
-                    if phase2_result["explainability_supported"]:
-                        from explainability.interface import generate_explanation
-                        detail_model, _ = hub.get_model(arch)
-                        with st.spinner("Computing selected-image attribution..."):
-                            detail_attribution = generate_explanation(detail_model, raw, phase2_inference, arch)
-                    else:
-                        st.info("Explainability is not currently supported for this model.")
-                detail_overlay = selected_overlay(
-                    detail_crop, selected, phase2_result["labels"], crop_bounds,
-                    show_mask=show_detail_mask, show_skeleton=show_detail_skeleton,
-                    show_bbox=show_detail_bbox, show_labels=show_detail_labels,
-                    attribution=detail_attribution, show_attribution=show_detail_xai,
-                )
-                crop_cols = st.columns(2 if enhanced_crop is not None else 1)
-                crop_cols[0].image(detail_crop, caption="Original high-resolution crop", width='stretch')
-                if enhanced_crop is not None:
-                    crop_cols[1].image(enhanced_crop, caption=f"AI Super-Resolution — Visualization Only ({detail_sr_scale}x)", width='stretch')
-                st.image(detail_overlay, caption="Selected filament detail overlays", width='stretch')
+            detail_info = {
+                "Filament ID": f"#{selected['filament_id']}",
+                "Confidence": round(float(selected.get("confidence", 0.0)), 3),
+                "Area (px)": round(float(selected.get("area_px", 0.0)), 2),
+                "Perimeter (px)": round(float(selected.get("perimeter_px", 0.0)), 2),
+                "Skeleton length (px)": round(float(selected.get("skeleton_length_px", 0.0)), 2),
+                "Average width (px)": round(float(selected.get("avg_width_px", 0.0)), 2),
+                "Sinuosity": round(float(selected.get("sinuosity", 1.0)), 3),
+                "Orientation / tilt (deg)": round(float(selected.get("orientation_deg", 0.0)), 2),
+                "Centroid X": round(float(selected["centroid"].get("x", 0.0)), 2),
+                "Centroid Y": round(float(selected["centroid"].get("y", 0.0)), 2),
+                "Bounding box": json.dumps(selected.get("bbox", {})),
+                "Spatial region": selected.get("spatial_region", "CENTER"),
+                "Risk indicator": selected.get("risk_screening_indicator", "LOW"),
+            }
+            physical = selected.get("physical", {})
+            if physical.get("calibrated"):
+                detail_info["Length (km)"] = round(float(physical["length_km"]), 2)
+                detail_info["Area (km²)"] = round(float(physical["area_km2"]), 2)
+            st.dataframe([detail_info], hide_index=True, width='stretch')
 
-                detail_info = {
-                    "Filament ID": f"#{selected['filament_id']}",
-                    "Confidence": round(float(selected.get("confidence", 0.0)), 3),
-                    "Area (px)": round(float(selected.get("area_px", 0.0)), 2),
-                    "Perimeter (px)": round(float(selected.get("perimeter_px", 0.0)), 2),
-                    "Skeleton length (px)": round(float(selected.get("skeleton_length_px", 0.0)), 2),
-                    "Average width (px)": round(float(selected.get("avg_width_px", 0.0)), 2),
-                    "Sinuosity": round(float(selected.get("sinuosity", 1.0)), 3),
-                    "Orientation / tilt (deg)": round(float(selected.get("orientation_deg", 0.0)), 2),
-                    "Centroid X": round(float(selected["centroid"].get("x", 0.0)), 2),
-                    "Centroid Y": round(float(selected["centroid"].get("y", 0.0)), 2),
-                    "Bounding box": json.dumps(selected.get("bbox", {})),
-                    "Spatial region": selected.get("spatial_region", "CENTER"),
-                    "Risk indicator": selected.get("risk_screening_indicator", "LOW"),
-                }
-                physical = selected.get("physical", {})
-                if physical.get("calibrated"):
-                    detail_info["Length (km)"] = round(float(physical["length_km"]), 2)
-                    detail_info["Area (km²)"] = round(float(physical["area_km2"]), 2)
-                st.dataframe([detail_info], hide_index=True, width='stretch')
-
-                selected_catalog = phase2_result["catalog"][selected_index]
-                json_data = json.dumps(selected_catalog, indent=2)
-                csv_row = dict(selected_catalog)
-                for key in ("centroid", "bbox", "physical"):
-                    csv_row[key] = json.dumps(csv_row[key])
-                detail_csv = io.StringIO()
-                csv_writer = csv.DictWriter(detail_csv, fieldnames=list(csv_row.keys()))
-                csv_writer.writeheader()
-                csv_writer.writerow(csv_row)
-                export_cols = st.columns(4)
-                export_cols[0].download_button("Export Filament JSON", json_data,
-                                               file_name=f"filament_{selected['filament_id']:03d}.json",
-                                               mime="application/json")
-                export_cols[1].download_button("Export Filament CSV", detail_csv.getvalue(),
-                                               file_name=f"filament_{selected['filament_id']:03d}.csv",
-                                               mime="text/csv")
-                export_cols[2].download_button("Download Original Crop", png_bytes(detail_crop),
-                                               file_name=f"filament_{selected['filament_id']:03d}_original.png",
+            selected_catalog = phase2_result["catalog"][selected_index]
+            json_data = json.dumps(selected_catalog, indent=2)
+            csv_row = dict(selected_catalog)
+            for key in ("centroid", "bbox", "physical"):
+                csv_row[key] = json.dumps(csv_row[key])
+            detail_csv = io.StringIO()
+            csv_writer = csv.DictWriter(detail_csv, fieldnames=list(csv_row.keys()))
+            csv_writer.writeheader()
+            csv_writer.writerow(csv_row)
+            export_cols = st.columns(4)
+            export_cols[0].download_button("Export Filament JSON", json_data,
+                                           file_name=f"filament_{selected['filament_id']:03d}.json",
+                                           mime="application/json")
+            export_cols[1].download_button("Export Filament CSV", detail_csv.getvalue(),
+                                           file_name=f"filament_{selected['filament_id']:03d}.csv",
+                                           mime="text/csv")
+            export_cols[2].download_button("Download Original Crop", png_bytes(detail_crop),
+                                           file_name=f"filament_{selected['filament_id']:03d}_original.png",
+                                           mime="image/png")
+            if enhanced_crop is not None:
+                export_cols[3].download_button("Download Enhanced Crop", png_bytes(enhanced_crop),
+                                               file_name=f"filament_{selected['filament_id']:03d}_upscaled.png",
                                                mime="image/png")
-                if enhanced_crop is not None:
-                    export_cols[3].download_button("Download Enhanced Crop", png_bytes(enhanced_crop),
-                                                   file_name=f"filament_{selected['filament_id']:03d}_upscaled.png",
-                                                   mime="image/png")
-                if st.button("Save Filament Detail", key="save_detail"):
-                    detail_dir = Path("outputs") / "filaments" / Path(uploaded.name).stem
-                    save_detail_artifacts(detail_dir, detail_crop, enhanced_crop, detail_overlay, selected)
-                    saved_filament_dir = detail_dir / f"filament_{int(selected['filament_id']):03d}"
-                    st.success(f"Saved detail artifacts to {saved_filament_dir}")
+            if st.button("Save Filament Detail", key="save_detail"):
+                detail_dir = Path("outputs") / "filaments" / Path(file_name).stem
+                save_detail_artifacts(detail_dir, detail_crop, enhanced_crop, detail_overlay, selected)
+                saved_filament_dir = detail_dir / f"filament_{int(selected['filament_id']):03d}"
+                st.success(f"Saved detail artifacts to {saved_filament_dir}")
     else:
         st.info("Upload an H-alpha image to run segmentation.")
 
