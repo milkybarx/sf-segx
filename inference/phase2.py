@@ -48,6 +48,10 @@ def run_phase2_analysis(image: np.ndarray, image_id: str = "image",
         filament["image_height"] = int(image.shape[0])
         filament["physical"] = physical_measurements(filament["skeleton_length_px"], filament["area_px"], calibration)
         filament["risk_screening_indicator"] = morphology_risk_screening(filament)
+        
+        # Enrich with coordinates, statistical, and advanced geometric properties
+        from analysis.filament_morphology import enrich_filament_properties
+        enrich_filament_properties(filament, prediction.probability, prediction.disk_mask)
     records = build_catalog(filaments, image_id, timestamp, model_name=model_name,
                              model_checkpoint=prediction.model_checkpoint, threshold=threshold)
     validate_catalog(records)

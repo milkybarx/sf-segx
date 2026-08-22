@@ -22,7 +22,27 @@ def filament_record(filament: Dict, image_id: str, timestamp: Optional[str] = No
                        "y_max": int(bbox.get("y_max", bbox.get("y", 0) + bbox.get("height", 0))),
                        "width": int(bbox.get("width", 0)), "height": int(bbox.get("height", 0))},
               "spatial_region": filament.get("spatial_region", "CENTER"),
-              "physical": physical or {"calibrated": False, "length_km": None, "area_km2": None}}
+              "physical": physical or {"calibrated": False, "length_km": None, "area_km2": None},
+              # Enriched morphological and coordinate fields
+              "aspect_ratio": filament.get("aspect_ratio"),
+              "length_width_ratio": filament.get("length_width_ratio"),
+              "perimeter_area_ratio": filament.get("perimeter_area_ratio"),
+              "skeleton_area_ratio": filament.get("skeleton_area_ratio"),
+              "compactness": filament.get("compactness"),
+              "prob_min": filament.get("prob_min"),
+              "prob_max": filament.get("prob_max"),
+              "prob_std": filament.get("prob_std"),
+              "prob_median": filament.get("prob_median"),
+              "prob_p90": filament.get("prob_p90"),
+              "disk_center_dist": filament.get("disk_center_dist"),
+              "solar_coordinates": filament.get("solar_coordinates"),
+              "solar_lat": filament.get("solar_lat"),
+              "solar_lon": filament.get("solar_lon"),
+              "active_region": filament.get("active_region"),
+              "eruption_indicator": filament.get("eruption_indicator"),
+              "filament_type": filament.get("filament_type"),
+              "rating": filament.get("rating"),
+              "orientation_stability": filament.get("orientation_stability")}
     return record
 
 

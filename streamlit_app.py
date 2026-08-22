@@ -24,6 +24,21 @@ from streamlit_extras.metric_cards import style_metric_cards
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import model_hub as hub
+import analysis.dashboard_integration as di
+
+# Historical validation cases for Demo Mode
+HISTORICAL_CASES = {
+    "2011-Sep-6 X2.1": {"label": "2011-Sep-6 X2.1", "description": "X2.1 flare from AR 11283; associated CME produced Kp=7 storm.", "cme_id": "2011-09-06T22:12:00-CME-001", "speed": 575.0, "lat": -28.0, "lon": -42.0, "half_angle": 45.0, "sep_observed": True, "max_kp": 7.0, "date": "2011-09-06"},
+    "2012-Jan-23 M8.7": {"label": "2012-Jan-23 M8.7", "description": "M8.7 from AR 11402; fast CME causing strong SEP and Kp=5.", "cme_id": "2012-01-23T04:00:00-CME-001", "speed": 2210.0, "lat": 44.0, "lon": 36.0, "half_angle": 61.0, "sep_observed": True, "max_kp": 5.0, "date": "2012-01-23"},
+    "2012-Mar-7 X5.4": {"label": "2012-Mar-7 X5.4", "description": "X5.4 from AR 11429; extremely fast and wide CME causing Kp=8.", "cme_id": "2012-03-07T00:24:00-CME-001", "speed": 2684.0, "lat": 18.0, "lon": -42.0, "half_angle": 81.0, "sep_observed": True, "max_kp": 8.0, "date": "2012-03-07"},
+    "2012-Jul-12 X1.4": {"label": "2012-Jul-12 X1.4", "description": "X1.4 from AR 11520; major Earth-directed CME causing Kp=7.", "cme_id": "2012-07-12T16:48:00-CME-001", "speed": 1405.0, "lat": -18.0, "lon": -3.0, "half_angle": 58.0, "sep_observed": True, "max_kp": 7.0, "date": "2012-07-12"},
+    "2014-Sep-10 X1.6": {"label": "2014-Sep-10 X1.6", "description": "X1.6 from AR 12158; Earth-directed causing minor Kp=4 storm.", "cme_id": "2014-09-10T18:00:00-CME-001", "speed": 1267.0, "lat": 11.0, "lon": -7.0, "half_angle": 52.0, "sep_observed": True, "max_kp": 4.0, "date": "2014-09-10"},
+    "2017-Sep-6 X9.3": {"label": "2017-Sep-6 X9.3", "description": "X9.3 from AR 12673; severe storm Kp=8, widespread radio blackout.", "cme_id": "2017-09-06T12:24:00-CME-001", "speed": 1571.0, "lat": -10.0, "lon": 36.0, "half_angle": 64.0, "sep_observed": True, "max_kp": 8.0, "date": "2017-09-06"},
+    "2017-Sep-10 X8.2 (Limb)": {"label": "2017-Sep-10 X8.2 (Limb)", "description": "X8.2 limb event; fast CME but missed Earth (near flank).", "cme_id": "2017-09-10T16:00:00-CME-001", "speed": 3163.0, "lat": -10.0, "lon": -104.0, "half_angle": 30.0, "sep_observed": True, "max_kp": 3.0, "date": "2017-09-10"},
+    "2021-Oct-28 X1.0": {"label": "2021-Oct-28 X1.0", "description": "X1.0 Halloween storm; slow arrival but caused SEP and Kp=4.", "cme_id": "2021-10-28T15:48:00-CME-001", "speed": 1194.0, "lat": -33.0, "lon": -5.0, "half_angle": 77.0, "sep_observed": True, "max_kp": 4.0, "date": "2021-10-28"},
+    "2023-Feb-24 M3.7": {"label": "2023-Feb-24 M3.7", "description": "M3.7 event causing strong Kp=6 storm.", "cme_id": "2023-02-24T20:23:00-CME-001", "speed": 1184.0, "lat": 16.0, "lon": 32.0, "half_angle": 49.0, "sep_observed": False, "max_kp": 6.0, "date": "2023-02-24"},
+    "2024-May-10 (May 2024 Storms)": {"label": "2024-May-10 (May 2024 Storms)", "description": "Complex of CMEs from AR 13664 causing extreme Kp=9 storm.", "cme_id": "2024-05-10T00:00:00-CME-001", "speed": 1500.0, "lat": -20.0, "lon": 0.0, "half_angle": 60.0, "sep_observed": True, "max_kp": 9.0, "date": "2024-05-10"}
+}
 
 CRIMSON = "#DC143C"
 CRIMSON_SOFT = "#ff5c7a"
@@ -171,6 +186,20 @@ phase2_threshold = st.sidebar.slider("Segmentation threshold", 0.20, 0.75, 0.50,
 show_explainability = st.sidebar.checkbox("Explainability (when supported)", value=False)
 
 page = st.sidebar.radio("View", ["Overview", "Validation Gallery", "Upload Image", "Upload Video"])
+
+st.sidebar.divider()
+st.sidebar.markdown("### Analysis Mode")
+analysis_mode = st.sidebar.radio("Mode", ["LIVE / CURRENT ANALYSIS", "HISTORICAL EVENT DEMO"])
+
+obs_time_str = ""
+historical_case = None
+
+if analysis_mode == "HISTORICAL EVENT DEMO":
+    st.sidebar.warning("HISTORICAL REPLAY MODE")
+    selected_case = st.sidebar.selectbox("Select Event", list(HISTORICAL_CASES.keys()))
+    historical_case = HISTORICAL_CASES[selected_case]
+else:
+    obs_time_str = st.sidebar.text_input("Observation Timestamp (ISO)", value="", placeholder="e.g. 2021-10-28T12:00:00Z")
 
 st.sidebar.divider()
 st.sidebar.caption("GGSIPU Hackathon 2026 · Track 19 · USAR")
@@ -406,6 +435,11 @@ elif page == "Upload Image":
                 csv_row = dict(selected_catalog)
                 for key in ("centroid", "bbox", "physical"):
                     csv_row[key] = json.dumps(csv_row[key])
+                # Phase 3 integration
+                phase3_metrics = di.render_phase3_sections(selected, analysis_mode, obs_time_str, historical_case)
+                if phase3_metrics:
+                    csv_row.update(phase3_metrics)
+
                 detail_csv = io.StringIO()
                 csv_writer = csv.DictWriter(detail_csv, fieldnames=list(csv_row.keys()))
                 csv_writer.writeheader()
@@ -429,6 +463,7 @@ elif page == "Upload Image":
                     paths = save_detail_artifacts(detail_dir, detail_crop, enhanced_crop, detail_overlay, selected)
                     saved_filament_dir = detail_dir / f"filament_{int(selected['filament_id']):03d}"
                     st.success(f"Saved detail artifacts to {saved_filament_dir}")
+
 
             if filaments:
                 fig = go.Figure(go.Bar(

@@ -1,0 +1,29 @@
+{
+    "features": [
+        "area",
+        "length",
+        "width",
+        "aspect_ratio",
+        "orientation",
+        "skeleton_length",
+        "sinuosity",
+        "confidence",
+        "centroid_lat",
+        "centroid_lon",
+        "disk_position",
+        "recent_flare_count",
+        "recent_C_count",
+        "recent_M_count",
+        "recent_X_count",
+        "hours_since_previous_flare",
+        "area_growth_rate",
+        "length_growth_rate",
+        "width_growth_rate",
+        "centroid_velocity",
+        "orientation_change",
+        "filament_type",
+        "filament_rating",
+        "recent_max_flare_class"
+    ],
+    "target": "M_X_WITHIN_24H"
+}
