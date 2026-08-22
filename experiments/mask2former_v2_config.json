@@ -1,0 +1,5 @@
+{
+  "image_size": 768,
+  "epochs_run": 1,
+  "best_val_dice": 0.24282836763431195
+}

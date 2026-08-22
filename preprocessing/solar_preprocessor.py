@@ -15,8 +15,14 @@ from typing import Tuple, Optional, Dict
 class SolarPreprocessor:
     """Preprocessing pipeline for H-alpha solar images."""
 
-    def __init__(self, target_size: int = 512):
+    def __init__(self, target_size: int = 512, disk_shrink: float = 0.93):
         self.target_size = target_size
+        # Fraction of the detected radius actually kept as "inside the disk" -- shrinking
+        # further than the default excludes more of the limb edge but also more real
+        # near-limb disk area. Kept as a constructor param (not touched here) specifically
+        # so experiments can override it without changing the default every other caller
+        # (including the currently-deployed Mask2Former checkpoint's own inference) relies on.
+        self.disk_shrink = disk_shrink
 
     def to_grayscale(self, image: np.ndarray) -> np.ndarray:
         """Convert to grayscale if needed."""
@@ -41,7 +47,7 @@ class SolarPreprocessor:
 
         largest = max(contours, key=cv2.contourArea)
         (cx, cy), radius = cv2.minEnclosingCircle(largest)
-        return int(cx), int(cy), int(radius * 0.93)  # Shrink by 7% to completely eliminate solar limb edge artifacts
+        return int(cx), int(cy), int(radius * self.disk_shrink)
 
     def create_disk_mask(self, shape: Tuple[int, int], cx: int, cy: int, radius: int) -> np.ndarray:
         """Create binary mask for the solar disk region."""

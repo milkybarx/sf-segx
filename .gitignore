@@ -1,6 +1,9 @@
 # Data (downloaded separately, see README "Get the data")
 data/
 cache_512/
+cache_768/
+cache_768_3ch/
+cache_*/
 *.zip
 
 # Python
