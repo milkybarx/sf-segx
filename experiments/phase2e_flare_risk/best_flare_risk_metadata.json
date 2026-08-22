@@ -1,0 +1,17 @@
+{
+  "phase": "2E",
+  "best_model_key": "context_RandomForest",
+  "model_name": "RandomForest",
+  "config_label": "+Context (A+B+C+D)",
+  "target": "M_X_WITHIN_24H",
+  "dataset": "data\\training\\filament_forecast_full.csv",
+  "val_pr_auc": 0.0444103860509943,
+  "val_threshold": 0.060000000000000005,
+  "val_threshold_cal": 0.03,
+  "test_pr_auc": 0.2538457448968673,
+  "test_cal_pr_auc": 0.029645829737182293,
+  "calibration_method": "sigmoid (Platt scaling) on VAL",
+  "training_timestamp": "2026-08-22T21:53:40.147683",
+  "active_region_id_handling": "dropped (too high cardinality for OHE)",
+  "association_features_in_primary": false
+}

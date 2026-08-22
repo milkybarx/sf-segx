@@ -1,3 +1,7 @@
 checkpoints/*.pt filter=lfs diff=lfs merge=lfs -text
 checkpoints/*.pth filter=lfs diff=lfs merge=lfs -text
 experiments/super_resolution/results/*.pt filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text
+reports/overlays/*.png filter=lfs diff=lfs merge=lfs -text
+visualizations/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+experiments/super_resolution/baseline_comparison/visual_comparisons/*.png filter=lfs diff=lfs merge=lfs -text

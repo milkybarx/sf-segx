@@ -1,0 +1,42 @@
+{
+  "static_LogisticRegression": {
+    "threshold": 0.11,
+    "threshold_cal": 0.06999999999999999
+  },
+  "static_RandomForest": {
+    "threshold": 0.15000000000000002,
+    "threshold_cal": 0.04
+  },
+  "static_XGBoost": {
+    "threshold": 0.09,
+    "threshold_cal": 0.03
+  },
+  "context_LogisticRegression": {
+    "threshold": 0.34,
+    "threshold_cal": 0.3
+  },
+  "context_RandomForest": {
+    "threshold": 0.060000000000000005,
+    "threshold_cal": 0.03
+  },
+  "context_XGBoost": {
+    "threshold": 0.01,
+    "threshold_cal": 0.03
+  },
+  "temporal_LogisticRegression": {
+    "threshold": 0.33,
+    "threshold_cal": 0.04
+  },
+  "temporal_RandomForest": {
+    "threshold": 0.04,
+    "threshold_cal": 0.03
+  },
+  "temporal_XGBoost": {
+    "threshold": 0.22,
+    "threshold_cal": 0.01
+  },
+  "ABLATION_association": {
+    "threshold": 0.04,
+    "threshold_cal": 0.03
+  }
+}

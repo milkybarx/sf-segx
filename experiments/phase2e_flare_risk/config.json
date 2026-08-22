@@ -1,0 +1,100 @@
+{
+  "numeric_configs": {
+    "static": [
+      "area",
+      "length",
+      "width",
+      "skeleton_length",
+      "aspect_ratio",
+      "sinuosity",
+      "orientation",
+      "confidence",
+      "centroid_lat",
+      "centroid_lon",
+      "disk_position"
+    ],
+    "context": [
+      "area",
+      "length",
+      "width",
+      "skeleton_length",
+      "aspect_ratio",
+      "sinuosity",
+      "orientation",
+      "confidence",
+      "centroid_lat",
+      "centroid_lon",
+      "disk_position",
+      "recent_flare_count",
+      "recent_C_count",
+      "recent_M_count",
+      "recent_X_count",
+      "hours_since_previous_flare",
+      "active_region_previous_flare_count",
+      "active_region_previous_M_count",
+      "active_region_previous_X_count"
+    ],
+    "temporal": [
+      "area",
+      "length",
+      "width",
+      "skeleton_length",
+      "aspect_ratio",
+      "sinuosity",
+      "orientation",
+      "confidence",
+      "centroid_lat",
+      "centroid_lon",
+      "disk_position",
+      "recent_flare_count",
+      "recent_C_count",
+      "recent_M_count",
+      "recent_X_count",
+      "hours_since_previous_flare",
+      "active_region_previous_flare_count",
+      "active_region_previous_M_count",
+      "active_region_previous_X_count",
+      "area_growth_rate",
+      "length_growth_rate",
+      "width_growth_rate",
+      "centroid_velocity",
+      "orientation_change",
+      "aspect_ratio_change",
+      "area_acceleration",
+      "length_acceleration",
+      "has_temporal_history"
+    ]
+  },
+  "categorical_configs": {
+    "static": [
+      "filament_type",
+      "filament_rating",
+      "recent_max_flare_class"
+    ],
+    "context": [
+      "filament_type",
+      "filament_rating",
+      "recent_max_flare_class"
+    ],
+    "temporal": [
+      "filament_type",
+      "filament_rating",
+      "recent_max_flare_class"
+    ]
+  },
+  "target": "M_X_WITHIN_24H",
+  "forbidden_features": [
+    "future_flare_count",
+    "first_future_flare_time",
+    "M_X_WITHIN_48H",
+    "M_OR_HIGHER_24H",
+    "X_CLASS_48H",
+    "C_OR_HIGHER_24H",
+    "strongest_future_flare_class",
+    "M_X_WITHIN_6H",
+    "M_X_WITHIN_12H",
+    "first_future_flare_class",
+    "X_CLASS_24H",
+    "M_X_WITHIN_24H"
+  ]
+}
