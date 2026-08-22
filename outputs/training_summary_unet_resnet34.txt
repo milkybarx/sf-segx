@@ -1,0 +1,9 @@
+arch=unet_resnet34
+label=U-Net (ResNet-34)
+checkpoint=checkpoints\unet_resnet34_best.pth
+best_val_dice=0.6629
+best_threshold=0.4
+best_threshold_dice=0.6636
+epochs=80
+train_size=601
+val_size=106

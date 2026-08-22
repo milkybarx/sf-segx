@@ -1,0 +1,62 @@
+# Solar Filament Segmentation & Space Weather Intelligence System
+
+# ============================================================
+# Default Configuration
+# ============================================================
+
+data:
+  dataset_root: "data/MAGFiLO_1.0_Kaggle_2026"
+  annotations_file: "train/MAGFiLO_1.0_Annotations_kaggle2026_train.json"
+  train_images_dir: "train/train_images"
+  test_images_dir: "test/test_images"
+  image_size: 512
+  original_size: 2048
+  train_ratio: 0.8
+  val_ratio: 0.2
+  seed: 42
+  num_workers: 0
+
+training:
+  batch_size: 4
+  epochs: 50
+  lr: 0.0001
+  weight_decay: 0.00001
+  scheduler: "cosine"
+  patience: 10
+  amp: true
+  gradient_clip: 1.0
+
+model:
+  name: "unet"  # "unet" is the validated, trained option; "mask2former" is available but untested end-to-end
+  in_channels: 1
+  num_queries: 20
+  hidden_dim: 128
+  num_decoder_layers: 3
+  dropout: 0.1
+
+frangi:
+  scales: [1, 2, 3, 5, 8]
+  alpha: 0.5
+  beta: 0.5
+  gamma: 15
+  black_ridges: true
+  threshold: 0.15
+  min_area: 100
+  max_area: 50000
+
+fusion:
+  alphas: [0.0, 0.25, 0.5, 0.75, 1.0]
+  default_alpha: 0.5
+
+morphology:
+  min_filament_area: 50
+  skeleton_method: "lee"
+
+device:
+  prefer_gpu: true
+  gpu_index: 0
+
+output:
+  checkpoint_dir: "checkpoints"
+  experiment_dir: "experiments"
+  visualization_dir: "outputs/visualizations"

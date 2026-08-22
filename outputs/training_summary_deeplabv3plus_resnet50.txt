@@ -1,0 +1,9 @@
+arch=deeplabv3plus_resnet50
+label=DeepLabV3+ (ResNet-50)
+checkpoint=outputs\best_deeplabv3plus_resnet50.pth
+best_val_dice=0.6521
+best_threshold=0.5
+best_threshold_dice=0.6521
+epochs=35
+train_size=601
+val_size=106

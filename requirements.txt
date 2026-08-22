@@ -1,0 +1,39 @@
+# Pinned to exactly what streamlit_app.py's import chain needs (model_hub.py -> train_smp.py,
+# plus the lazily-imported monai/transformers builders for Attention U-Net / SegFormer).
+# Kept minimal and fully pinned on purpose: unrelated packages or open-ended version ranges
+# (e.g. training/, experiments/, notebook-only tools) slow down or destabilize the Streamlit
+# Community Cloud build -- if you need those for local dev, install them separately.
+
+# Core deep learning
+# torch==2.6.0 (what this repo was trained/tested with locally) has NO published wheels for
+# Python 3.14, which is what Streamlit Community Cloud currently runs -- pip/uv both fail to
+# resolve it there ("no wheels with a matching Python ABI tag"). Pinned to the newest version
+# that Cloud's Python 3.14.7 actually has wheels for instead (confirmed against its own error
+# output listing available versions). Inference-only usage (load a state_dict, run forward())
+# is stable across this range, so this doesn't affect model behavior.
+torch==2.13.0
+torchvision==0.28.0
+segmentation-models-pytorch==0.5.0
+monai==1.6.0
+transformers==5.14.1
+
+# Image processing
+opencv-python-headless==5.0.0.93
+albumentations==2.0.8
+scipy==1.16.3
+
+# Data / utils
+numpy==2.3.5
+tqdm==4.67.1
+
+# Dashboard
+streamlit==1.61.1
+streamlit-extras==1.6.0
+plotly==6.3.0
+# visualization/phase2.py's create_phase2_figure() (Upload Image page's Phase 2 panel) uses
+# matplotlib directly -- required at runtime, not just for training/notebooks.
+matplotlib==3.10.6
+scikit-learn
+joblib
+segment-anything
+streamlit-option-menu

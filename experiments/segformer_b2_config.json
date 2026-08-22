@@ -1,0 +1,7 @@
+{
+  "model_name": "segformer_b2",
+  "image_size": 768,
+  "loss": "focal_dice",
+  "epochs_run": 40,
+  "best_val_dice": 0.695994281909207
+}
