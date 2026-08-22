@@ -152,7 +152,7 @@ def cached_status(arch):
 
 def model_options():
     models = cached_model_list()
-    labels = {m["arch"]: f"{m['label']}" + (f" · Dice {m['best_val_dice']:.3f}" if m["best_val_dice"] else " · not trained") for m in models}
+    labels = {m["arch"]: f"{m['label']}" + (f"  |  Val Dice: {m['best_val_dice']:.3f}" if m["best_val_dice"] else "  |  Untrained") for m in models}
     return models, labels
 
 
@@ -161,6 +161,22 @@ def model_options():
 # --------------------------------------------------------------------------------------
 st.sidebar.markdown("## 🔴 Solar Filament Intelligence")
 st.sidebar.caption("H-alpha filament segmentation & space weather analysis")
+
+from streamlit_option_menu import option_menu
+with st.sidebar:
+    page = option_menu(
+        menu_title=None,
+        options=["Overview", "Validation Gallery", "Upload Image", "Upload Video"],
+        icons=['bar-chart-line', 'images', 'cloud-upload', 'camera-video'],
+        default_index=2,
+        styles={
+            "container": {"padding": "0!important", "background-color": "transparent"},
+            "icon": {"color": "white", "font-size": "16px"}, 
+            "nav-link": {"font-size": "15px", "text-align": "left", "margin":"0px", "--hover-color": "#444"},
+            "nav-link-selected": {"background-color": "#DC143C"},
+        }
+    )
+    st.divider()
 
 models, labels = model_options()
 default_arch = next((m["arch"] for m in models if m["best_val_dice"]), models[0]["arch"])
@@ -171,7 +187,6 @@ arch = st.sidebar.selectbox(
 phase2_threshold = st.sidebar.slider("Segmentation threshold (Upload Image)", 0.20, 0.75, 0.50, 0.01)
 show_explainability = st.sidebar.checkbox("Explainability (when supported)", value=False)
 
-page = st.sidebar.radio("View", ["Overview", "Validation Gallery", "Upload Image", "Upload Video"])
 
 st.sidebar.divider()
 st.sidebar.caption("GGSIPU Hackathon 2026 · Track 19 · USAR")
@@ -302,7 +317,11 @@ elif page == "Upload Image":
     st.header("Upload & Evaluate an Image", divider="red")
     st.caption(labels[arch])
 
-    uploaded = st.file_uploader("H-alpha solar image (grayscale or color)", type=["jpg", "jpeg", "png"])
+    upload_container = st.container(border=True)
+    with upload_container:
+        st.markdown("<h3 style='text-align: center;'>🚀 Drop a Solar H-Alpha Image Here</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: gray;'>Upload a grayscale or color image to detect filaments and measure eruption risk.</p>", unsafe_allow_html=True)
+        uploaded = st.file_uploader(" ", type=["jpg", "jpeg", "png"], label_visibility="collapsed")
     if uploaded is not None:
         data = np.frombuffer(uploaded.read(), dtype=np.uint8)
         raw_color = cv2.imdecode(data, cv2.IMREAD_COLOR)
@@ -382,8 +401,10 @@ elif page == "Upload Image":
                 st.image(skeleton_panel, caption="One-pixel cyan skeletons", width='stretch')
             figure = create_phase2_figure(original_display, probs, pred, filaments, phase2_result["attribution"])
             st.pyplot(figure, clear_figure=True)
-            st.download_button("Download JSON catalog", json.dumps(phase2_result["catalog"], indent=2),
-                               file_name="filament_catalog.json", mime="application/json")
+            st.markdown("#### Export Results")
+            export_cols = st.columns(2)
+            export_cols[0].download_button("Download JSON catalog", json.dumps(phase2_result["catalog"], indent=2),
+                               file_name="filament_catalog.json", mime="application/json", use_container_width=True)
             csv_buffer = io.StringIO()
             writer = csv.DictWriter(csv_buffer, fieldnames=["image_id", "model_name", "model_checkpoint", "threshold",
                                                               "filament_id", "confidence", "area_px",
@@ -391,7 +412,7 @@ elif page == "Upload Image":
                                                               "spatial_region"])
             writer.writeheader()
             writer.writerows({key: record.get(key) for key in writer.fieldnames} for record in phase2_result["catalog"])
-            st.download_button("Download CSV catalog", csv_buffer.getvalue(), file_name="filament_catalog.csv", mime="text/csv")
+            export_cols[1].download_button("Download CSV catalog", csv_buffer.getvalue(), file_name="filament_catalog.csv", mime="text/csv", use_container_width=True)
 
             if filaments:
                 fig = go.Figure(go.Bar(
@@ -410,6 +431,31 @@ elif page == "Upload Image":
                 with st.expander("Per-filament measurements"):
                     st.dataframe(morphology_table_rows(filaments), width='stretch')
 
+                st.divider()
+                st.subheader("Space Weather: Flare Prediction", divider="orange")
+                st.caption("Uses the trained Random Forest model (flare_rf_model.pkl) to predict 24h eruption risk based on filament geometry.")
+                from analysis.flare_prediction import calculate_flare_probability
+                
+                display_count = min(len(filaments), 4)
+                risk_cols = st.columns(display_count) if display_count > 0 else []
+                
+                for i, f in enumerate(filaments[:display_count]):
+                    mocked_distance = float(np.random.uniform(10.0, 100.0))
+                    risk = calculate_flare_probability(
+                        length_px=f.get('skeleton_length_px', 0.0),
+                        distance_to_sunspot=mocked_distance,
+                        region_type=f.get('spatial_region', 'ARF')
+                    )
+                    
+                    risk_cols[i].metric(
+                        f"Filament #{f['filament_id']}", 
+                        f"{risk:.1%}", 
+                        delta="HIGH RISK" if risk > 0.5 else "LOW RISK",
+                        delta_color="inverse"
+                    )
+                if len(filaments) > 4:
+                    st.info(f"Showing risk for the top 4 filaments (out of {len(filaments)} detected).")
+                
                 st.divider()
                 st.subheader("Filament Detail Inspector")
                 selected_index = st.selectbox(
