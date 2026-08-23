@@ -9,13 +9,8 @@ from analysis.cme_geometry import CMEGeometryModel
 from analysis.spacecraft_catalog import SpacecraftCatalog
 from analysis.space_weather_risk import SpaceWeatherRiskAnalyzer
 from analysis.satellite_risk import SatelliteRiskAnalyzer
-from analysis.flare_inference import FlareRiskInference
 
 CRIMSON = "#DC143C"
-
-@st.cache_resource
-def get_flare_inference():
-    return FlareRiskInference()
 
 @st.cache_resource
 def get_event_extractor():
@@ -27,42 +22,14 @@ def get_catalogs():
 
 def render_phase3_sections(selected_filament: dict, mode: str, obs_time_str: str, historical_case: dict = None):
     """Render the Phase 3 dashboard sections given a selected filament."""
-    
-    st.divider()
-    st.header("Section 3: Relative Flare Risk", divider="red")
-    
-    # 3. Relative Flare Risk
-    inference = get_flare_inference()
-    
+
     if mode == "HISTORICAL EVENT DEMO" and historical_case:
         obs_time_str = historical_case["date"] + "T12:00:00Z"
-        
-    if not obs_time_str:
-        st.warning("Relative flare-risk unavailable: observation timestamp required.")
-        st.info("Please provide a timestamp in the sidebar or filename to enable flare risk scoring.")
-        score, risk_level = None, None
-    else:
-        with st.spinner("Calculating Flare Risk..."):
-            score, status = inference.predict_risk(selected_filament, obs_time_str)
-            
-        if pd.isna(score):
-            st.error(f"Flare risk calculation failed: {status}")
-            risk_level = "UNKNOWN"
-        else:
-            if score >= 0.75: risk_level = "EXTREME"
-            elif score >= 0.5: risk_level = "HIGH"
-            elif score >= 0.25: risk_level = "MODERATE"
-            else: risk_level = "LOW"
-            
-            st.markdown(f"### Relative Flare Risk: **{risk_level}**")
-            st.markdown(f"**Score**: {score:.3f}")
-            st.markdown(f"**Status**: `{status}`")
-            st.caption("Uncalibrated model score used for relative ranking of flare risk.")
 
-    # 4. DONKI Event Chain
+    # 3. DONKI Event Chain
     st.divider()
-    st.header("Section 4: DONKI Event Chain", divider="red")
-    
+    st.header("Section 3: DONKI Event Chain", divider="red")
+
     if mode == "HISTORICAL EVENT DEMO":
         st.info("EVENT SOURCE: HISTORICAL DONKI REPLAY")
         if not historical_case:
@@ -143,7 +110,7 @@ def render_phase3_sections(selected_filament: dict, mode: str, obs_time_str: str
         return
         
     st.divider()
-    st.header("Section 5: CME Propagation", divider="red")
+    st.header("Section 4: CME Propagation", divider="red")
     
     cat, geom, sw_risk, sat_risk = get_catalogs()
     
@@ -152,7 +119,7 @@ def render_phase3_sections(selected_filament: dict, mode: str, obs_time_str: str
     st.caption("OUR_GEOMETRIC_ESTIMATE")
     
     st.divider()
-    st.header("Section 6: Spacecraft Exposure", divider="red")
+    st.header("Section 5: Spacecraft Exposure", divider="red")
     
     sc_results = cat.evaluate_all_spacecraft(
         float(cme_lat), float(cme_lon), float(cme_ha), float(cme_speed), cme_date
@@ -206,7 +173,7 @@ def render_phase3_sections(selected_filament: dict, mode: str, obs_time_str: str
     st.plotly_chart(fig, use_container_width=True)
     
     st.divider()
-    st.header("Section 7: Subsystem Vulnerability", divider="red")
+    st.header("Section 6: Subsystem Vulnerability", divider="red")
     
     # Calculate space weather risks
     flare_class = "M1.0" # Mock if unavailable
@@ -242,11 +209,9 @@ def render_phase3_sections(selected_filament: dict, mode: str, obs_time_str: str
     st.dataframe(df_sub, use_container_width=True)
     
     st.divider()
-    st.header("Section 8: Data Provenance", divider="red")
+    st.header("Section 7: Data Provenance", divider="red")
     with st.expander("View Provenance Tracking"):
         st.markdown(f"- **Segmentation Model**: `{selected_filament.get('model_name', 'Unknown')}`")
-        st.markdown(f"- **Flare-risk Model**: `Phase 2E.2 RandomForest +Context`")
-        st.markdown(f"- **Flare-risk Status**: `UNCALIBRATED`")
         st.markdown(f"- **DONKI Event Source**: `{'HISTORICAL DONKI REPLAY' if mode == 'HISTORICAL EVENT DEMO' else 'LIVE DONKI API'}`")
         st.markdown(f"- **CME Source**: `DONKI_OBSERVED`")
         st.markdown(f"- **Propagation**: `OUR_GEOMETRIC_ESTIMATE`")
@@ -254,9 +219,6 @@ def render_phase3_sections(selected_filament: dict, mode: str, obs_time_str: str
         st.markdown(f"- **Calculation**: `OUR_GEOMETRIC_ESTIMATE`")
 
     export_metrics = {
-        "Relative_Flare_Risk_Score": score,
-        "Flare_Risk_Status": risk_level,
-        "Flare_Risk_Model_Version": "Phase 2E.2 RandomForest +Context",
         "DONKI_FLR_ID": "UNKNOWN",
         "DONKI_CME_ID": historical_case["cme_id"] if historical_case else (first_cme.get("cme_id") if 'first_cme' in locals() and first_cme else "UNKNOWN"),
         "CME_Speed": cme_speed,
