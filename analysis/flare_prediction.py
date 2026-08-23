@@ -17,7 +17,7 @@ def get_rf_model():
             _rf_model = joblib.load(model_path)
     return _rf_model
 
-def calculate_flare_probability(length_px: float, distance_to_sunspot: float, region_type: str) -> float:
+def calculate_flare_probability(length_px: float, region_type: str) -> float:
     """
     Computes a solar flare eruption probability score using a trained Random Forest ML model
     based on historical flare data.
@@ -30,8 +30,7 @@ def calculate_flare_probability(length_px: float, distance_to_sunspot: float, re
         elif region_type == "IRF": baseline = 0.20
         else: baseline = 0.05
         length_factor = 1.0 - np.exp(-0.005 * length_px)
-        proximity_factor = np.exp(-0.006 * distance_to_sunspot)
-        prob = baseline + (1.0 - baseline) * length_factor * proximity_factor
+        prob = baseline + (1.0 - baseline) * length_factor
         return float(np.clip(prob, 0.0, 0.98))
         
     # Map categorical Region Type for ML inference
@@ -39,10 +38,10 @@ def calculate_flare_probability(length_px: float, distance_to_sunspot: float, re
     region_code = region_map.get(region_type, 0)
     
     # Random Forest expects a 2D array: [n_samples, n_features]
-    # Features must match training: ['length_px', 'distance_to_sunspot', 'region_code']
+    # Features must match training: ['length_px', 'region_code']
     # We must construct a DataFrame or use an array if no feature names are enforced.
     # scikit-learn models handle arrays perfectly if they were trained on pandas with matching columns.
-    features = np.array([[length_px, distance_to_sunspot, region_code]])
+    features = np.array([[length_px, region_code]])
     
     # Predict probability of class 1 (Flare)
     probs = model.predict_proba(features)
