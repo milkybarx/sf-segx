@@ -493,13 +493,10 @@ elif page == "Upload Image":
             st.subheader("Space Weather: Flare Prediction", divider="orange")
             st.caption(
                 "Uses the trained Random Forest model (flare_rf_model.pkl) to predict 24h eruption "
-                "risk from filament geometry and its pixel distance from the solar disk center -- a "
-                "proxy for proximity to typical active-region latitudes, not an actual "
-                "detected-sunspot distance (this repo has no sunspot catalog)."
+                "risk from filament skeleton length and spatial region."
             )
             from analysis.flare_prediction import calculate_flare_probability
 
-            disk_center_x, disk_center_y = raw.shape[1] / 2.0, raw.shape[0] / 2.0
             display_count = min(len(filaments), 4)
             risk_cols = st.columns(display_count) if display_count > 0 else []
 
