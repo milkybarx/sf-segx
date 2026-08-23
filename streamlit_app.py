@@ -504,19 +504,8 @@ elif page == "Upload Image":
             risk_cols = st.columns(display_count) if display_count > 0 else []
 
             for i, f in enumerate(filaments[:display_count]):
-<<<<<<< HEAD
                 risk = calculate_flare_probability(
                     length_px=f.get('skeleton_length_px', 0.0),
-=======
-                fc = f.get("centroid", {})
-                disk_proximity_px = float(np.hypot(
-                    fc.get("x", disk_center_x) - disk_center_x,
-                    fc.get("y", disk_center_y) - disk_center_y,
-                ))
-                risk = calculate_flare_probability(
-                    length_px=f.get('skeleton_length_px', 0.0),
-                    distance_to_sunspot=disk_proximity_px,
->>>>>>> main
                     region_type=f.get('spatial_region', 'ARF')
                 )
                 
