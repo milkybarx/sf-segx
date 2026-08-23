@@ -504,6 +504,10 @@ elif page == "Upload Image":
             risk_cols = st.columns(display_count) if display_count > 0 else []
 
             for i, f in enumerate(filaments[:display_count]):
+<<<<<<< HEAD
+                risk = calculate_flare_probability(
+                    length_px=f.get('skeleton_length_px', 0.0),
+=======
                 fc = f.get("centroid", {})
                 disk_proximity_px = float(np.hypot(
                     fc.get("x", disk_center_x) - disk_center_x,
@@ -512,6 +516,7 @@ elif page == "Upload Image":
                 risk = calculate_flare_probability(
                     length_px=f.get('skeleton_length_px', 0.0),
                     distance_to_sunspot=disk_proximity_px,
+>>>>>>> main
                     region_type=f.get('spatial_region', 'ARF')
                 )
                 
@@ -525,7 +530,7 @@ elif page == "Upload Image":
                 st.info(f"Showing risk for the top 4 filaments (out of {len(filaments)} detected).")
             
             st.divider()
-            st.subheader("🌍 CME Earth Impact Trajectory", divider="red")
+            st.subheader("CME Earth Impact Trajectory", divider="red")
             st.caption("Estimates the path of a potential Coronal Mass Ejection based on the filament's position. Filaments near the center of the solar disk are more likely to be Earth-directed.")
             
             center_x = raw.shape[1] / 2.0
@@ -546,25 +551,26 @@ elif page == "Upload Image":
             )
             
             from visualization.three_d_trajectory import plot_3d_trajectory
+            
             with st.spinner("Rendering 3D solar environment and orbital trajectory..."):
                 fig_traj, is_impact = plot_3d_trajectory(raw, pred, filaments[traj_filament_index])
                 st.plotly_chart(fig_traj, use_container_width=True)
                 
             if is_impact:
-                st.error("⚠️ **WARNING:** An eruption from this filament would likely hit Earth, potentially causing a geomagnetic storm.")
+                st.error("**WARNING:** An eruption from this filament would likely hit Earth, potentially causing a geomagnetic storm.")
             else:
-                st.success("✅ **SAFE:** An eruption from this filament is not Earth-directed.")
+                st.success("**SAFE:** An eruption from this filament is not Earth-directed.")
             
             with st.expander("How is this calculated?"):
                 st.markdown("""
-                **1. 3D Sun Mapping**  
-                The 2D solar image is mathematically wrapped around a 3D sphere. The center of the 2D image corresponds to the point on the Sun facing directly at Earth (Longitude 0°, Latitude 0°).
+                **1. 3D Sun Mapping & Eruption Vector**  
+                The 2D solar image is mathematically wrapped around the Earth-facing hemisphere of a 3D sphere. When a filament erupts, we assume it travels radially outward from the Sun's surface. We calculate its exact 3D vector based on its X/Y pixel coordinates.
                 
-                **2. Eruption Vector**  
-                When a filament erupts, we assume it travels radially outward from the Sun's surface. We calculate its exact 3D vector based on its X/Y pixel coordinates. A filament near the equator (center) points at Earth, while one near the poles points "up" or "down" into space.
+                **2. Kinematic Drag-Based Model (DBM)**  
+                Unlike simple geometrical models, CMEs do not travel at a constant speed! The CME is dynamically accelerated or decelerated by the ambient solar wind (assumed ~400 km/s) via aerodynamic drag. We calculate the filament's area to estimate the initial eruption velocity (up to 2500 km/s), and use numerical Euler integration to determine the exact Time of Arrival (TOA) at 1 AU based on the drag coefficient.
                 
-                **3. Earth Impact Detection (Accounting for Orbital Velocity)**  
-                A Coronal Mass Ejection takes roughly 15 hours to 3 days to reach Earth. Because Earth orbits the Sun at ~0.986 degrees per day, it will have moved by the time the CME arrives! We calculate Earth's future position 2 days ahead, and check the angle between the CME's eruption vector and Earth's *future* orbital position. If the angle is less than 25° (a 50° wide cone), it triggers a Geomagnetic Storm Warning!
+                **3. The Parker Spiral & Impact Detection**  
+                The background environment of the heliosphere is plotted as an Archimedean spiral (the Parker Spiral), representing the Interplanetary Magnetic Field curved by the Sun's rotation. We calculate Earth's exact orbital position at the predicted TOA (moving ~0.986°/day). If the CME's trajectory intersects Earth's *future* position within a 25° radius, a Geomagnetic Storm Warning is issued!
                 """)
             
             st.divider()
