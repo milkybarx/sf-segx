@@ -59,13 +59,6 @@ else:
     GALLERY_IMG_DIR, GALLERY_MASK_DIR = _BUNDLED_IMG_DIR, _BUNDLED_MASK_DIR
 
 EXTERNAL_MODELS = {
-    "patch_refiner": {
-        "label": "Patch Refiner (Mask2Former, 512px)",
-        "kind": "mask2former",
-        "checkpoint": os.path.join(ROOT, "checkpoints", "patch_refiner_best.pth"),
-        "resolution": 512,
-        "best_threshold": 0.5,
-    },
     "medsam": {
         "label": "MedSAM (ViT-B)",
         "kind": "medsam",

@@ -76,20 +76,7 @@ MODEL_REGISTRY = {
         ),
         "checkpoint": "deeplabv3plus_resnet50_best.pth",
     },
-    "attention_unet": {
-        # MONAI's AttentionUnet is a from-scratch architecture (no swappable ImageNet
-        # encoder backbone, unlike the smp models above) -- attention gates on the skip
-        # connections instead of a pretrained encoder, so it never touches the network
-        # regardless; "build_inference" is identical to "build" here.
-        "label": "Attention U-Net (MONAI)",
-        "build": lambda: __import__("monai.networks.nets", fromlist=["AttentionUnet"]).AttentionUnet(
-            spatial_dims=2, in_channels=1, out_channels=1,
-            channels=(32, 64, 128, 256, 512), strides=(2, 2, 2, 2),
-        ),
-        "checkpoint": "attention_unet_best.pth",
-    },
 }
-MODEL_REGISTRY["attention_unet"]["build_inference"] = MODEL_REGISTRY["attention_unet"]["build"]
 
 
 class GONGPreprocessor:

@@ -33,7 +33,8 @@ def main():
     print("=" * 80)
     
     # 1. Enumerate all supported models
-    models = ["unet_resnet34", "deeplabv3plus_resnet50", "attention_unet", "mask2former", "segformer_b0"]
+    models = ["unet_resnet34", "deeplabv3plus_resnet50", "mask2former_phase2_hybrid",
+               "mask2former_phase3", "segformer_b2", "medsam"]
     print(f"Supported segmentation models detected: {models}\n")
     
     # Locate test image
