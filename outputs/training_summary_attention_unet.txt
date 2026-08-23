@@ -1,9 +1,0 @@
-arch=attention_unet
-label=Attention U-Net (MONAI)
-checkpoint=checkpoints\attention_unet_best.pth
-best_val_dice=0.6507 (epoch 20; run crashed epoch 22/25 on a transient file-read error, fixed in train_smp.py; not re-run given plateaued trend)
-best_threshold=0.5
-best_threshold_dice=0.6507
-epochs=20 (of 25 planned)
-train_size=601
-val_size=106
