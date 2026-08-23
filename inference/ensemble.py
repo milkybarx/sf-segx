@@ -69,6 +69,12 @@ def run_ensemble_inference(raw_img: np.ndarray, archs: list = None, use_tta: boo
         else:
             small, disk, probs, _ = hub.run_inference(raw_img, arch, thresh)
 
+        # Ensemble is the one path that loads every trained architecture at once --
+        # release each model right after using it instead of leaving all 5 (including
+        # two ~270-375MB Mask2Former variants) cached in memory simultaneously, which
+        # risks an out-of-memory kill on constrained hosts (see release_model()).
+        hub.release_model(arch)
+
         if small_ref is None:
             small_ref, disk_ref = small, disk
         weighted_sum = probs * weight if weighted_sum is None else weighted_sum + probs * weight

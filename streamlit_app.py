@@ -394,12 +394,17 @@ elif page == "Upload Image":
         raw = hub.to_halpha_style(raw_color)
 
         from inference.phase2 import run_phase2_analysis
-        with st.spinner("Running segmentation and Phase 2 analysis..."):
-            phase2_result = run_phase2_analysis(
-                raw, image_id=file_name, model_name=arch,
-                threshold=phase2_threshold, explain=show_explainability,
-            )
-            
+        try:
+            with st.spinner("Running segmentation and Phase 2 analysis..."):
+                phase2_result = run_phase2_analysis(
+                    raw, image_id=file_name, model_name=arch,
+                    threshold=phase2_threshold, explain=show_explainability,
+                )
+        except Exception as e:
+            st.error(f"Segmentation failed for model '{arch}'. Try a different model or image.")
+            st.caption(f"Details: {e}")
+            st.stop()
+
         phase2_inference = phase2_result["inference"]
         small = phase2_inference.preprocessed
         probs = cv2.resize(phase2_inference.probability, (small.shape[1], small.shape[0]))
@@ -429,25 +434,33 @@ elif page == "Upload Image":
         )
         if run_ensemble:
             from inference.ensemble import run_ensemble_inference
-            with st.spinner("Running all 5 models with test-time augmentation..."):
-                ens_small, ens_disk, ens_probs, ens_mask, ens_weights, agreement = run_ensemble_inference(raw)
-            st.markdown("#### Ensemble Consensus & Uncertainty")
-            st.caption(
-                "Weighted-averaged prediction across every trained model (weights: "
-                + ", ".join(f"{a} {w:.3f}" for a, w in ens_weights.items())
-                + f") with test-time augmentation. Measured honestly: this does not "
-                "always beat the single best model's raw Dice — its real value is the "
-                "agreement map, which flags where independently-architected models "
-                "disagree (a signal a single model's own confidence score can't give you)."
-            )
-            ecols = st.columns(3)
-            ecols[0].image(overlay_rgb(ens_small, ens_mask, color=(220, 20, 60)),
-                           caption="Ensemble Prediction", width='stretch')
-            ecols[1].image(confidence_rgb(ens_probs), caption="Ensemble Confidence", width='stretch')
-            agreement_heat = (np.clip(1.0 - agreement, 0, 1) * 255).astype(np.uint8)
-            agreement_rgb = cv2.applyColorMap(agreement_heat, cv2.COLORMAP_HOT)
-            agreement_rgb = cv2.cvtColor(agreement_rgb, cv2.COLOR_BGR2RGB)
-            ecols[2].image(agreement_rgb, caption="Model Disagreement (bright = models conflict)", width='stretch')
+            try:
+                with st.spinner("Running all 5 models with test-time augmentation..."):
+                    ens_small, ens_disk, ens_probs, ens_mask, ens_weights, agreement = run_ensemble_inference(raw)
+                st.markdown("#### Ensemble Consensus & Uncertainty")
+                st.caption(
+                    "Weighted-averaged prediction across every trained model (weights: "
+                    + ", ".join(f"{a} {w:.3f}" for a, w in ens_weights.items())
+                    + f") with test-time augmentation. Measured honestly: this does not "
+                    "always beat the single best model's raw Dice — its real value is the "
+                    "agreement map, which flags where independently-architected models "
+                    "disagree (a signal a single model's own confidence score can't give you)."
+                )
+                ecols = st.columns(3)
+                ecols[0].image(overlay_rgb(ens_small, ens_mask, color=(220, 20, 60)),
+                               caption="Ensemble Prediction", width='stretch')
+                ecols[1].image(confidence_rgb(ens_probs), caption="Ensemble Confidence", width='stretch')
+                agreement_heat = (np.clip(1.0 - agreement, 0, 1) * 255).astype(np.uint8)
+                agreement_rgb = cv2.applyColorMap(agreement_heat, cv2.COLORMAP_HOT)
+                agreement_rgb = cv2.cvtColor(agreement_rgb, cv2.COLOR_BGR2RGB)
+                ecols[2].image(agreement_rgb, caption="Model Disagreement (bright = models conflict)", width='stretch')
+            except Exception as e:
+                st.error(
+                    "Ensemble inference failed -- this loads every trained model at once "
+                    "and can exceed available memory on constrained hosts. Try again with "
+                    "a single model instead."
+                )
+                st.caption(f"Details: {e}")
 
         from visualization.phase2 import _instance_panel, create_phase2_figure
         from visualization.detail import crop_filament, detail_record, save_detail_artifacts, selected_overlay
@@ -497,55 +510,63 @@ elif page == "Upload Image":
             )
             from analysis.flare_prediction import calculate_flare_probability
 
-            display_count = min(len(filaments), 4)
-            risk_cols = st.columns(display_count) if display_count > 0 else []
+            try:
+                display_count = min(len(filaments), 4)
+                risk_cols = st.columns(display_count) if display_count > 0 else []
 
-            for i, f in enumerate(filaments[:display_count]):
-                risk = calculate_flare_probability(
-                    length_px=f.get('skeleton_length_px', 0.0),
-                    region_type=f.get('spatial_region', 'ARF')
-                )
-                
-                risk_cols[i].metric(
-                    f"Filament #{f['filament_id']}", 
-                    f"{risk:.1%}", 
-                    delta="HIGH RISK" if risk > 0.5 else "LOW RISK",
-                    delta_color="inverse"
-                )
-            if len(filaments) > 4:
-                st.info(f"Showing risk for the top 4 filaments (out of {len(filaments)} detected).")
-            
+                for i, f in enumerate(filaments[:display_count]):
+                    risk = calculate_flare_probability(
+                        length_px=f.get('skeleton_length_px', 0.0),
+                        region_type=f.get('spatial_region', 'ARF')
+                    )
+
+                    risk_cols[i].metric(
+                        f"Filament #{f['filament_id']}",
+                        f"{risk:.1%}",
+                        delta="HIGH RISK" if risk > 0.5 else "LOW RISK",
+                        delta_color="inverse"
+                    )
+                if len(filaments) > 4:
+                    st.info(f"Showing risk for the top 4 filaments (out of {len(filaments)} detected).")
+            except Exception as e:
+                st.error("Flare risk prediction failed.")
+                st.caption(f"Details: {e}")
+
             st.divider()
             st.subheader("CME Earth Impact Trajectory", divider="red")
             st.caption("Estimates the path of a potential Coronal Mass Ejection based on the filament's position. Filaments near the center of the solar disk are more likely to be Earth-directed.")
-            
-            center_x = raw.shape[1] / 2.0
-            best_idx = 0
-            min_dist = float('inf')
-            for i, f in enumerate(filaments):
-                dist = abs(f.get("centroid", {}).get("x", 0) - center_x)
-                if dist < min_dist:
-                    min_dist = dist
-                    best_idx = i
-            
-            traj_filament_index = st.selectbox(
-                "Select a filament to view its potential eruption trajectory:", 
-                options=list(range(len(filaments))),
-                index=best_idx,
-                format_func=lambda index: f"Filament #{filaments[index]['filament_id']}",
-                key="traj_filament"
-            )
-            
-            from visualization.three_d_trajectory import plot_3d_trajectory
-            
-            with st.spinner("Rendering 3D solar environment and orbital trajectory..."):
-                fig_traj, is_impact = plot_3d_trajectory(raw, pred, filaments[traj_filament_index])
-                st.plotly_chart(fig_traj, use_container_width=True)
-                
-            if is_impact:
-                st.error("**WARNING:** An eruption from this filament would likely hit Earth, potentially causing a geomagnetic storm.")
-            else:
-                st.success("**SAFE:** An eruption from this filament is not Earth-directed.")
+
+            try:
+                center_x = raw.shape[1] / 2.0
+                best_idx = 0
+                min_dist = float('inf')
+                for i, f in enumerate(filaments):
+                    dist = abs(f.get("centroid", {}).get("x", 0) - center_x)
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_idx = i
+
+                traj_filament_index = st.selectbox(
+                    "Select a filament to view its potential eruption trajectory:",
+                    options=list(range(len(filaments))),
+                    index=best_idx,
+                    format_func=lambda index: f"Filament #{filaments[index]['filament_id']}",
+                    key="traj_filament"
+                )
+
+                from visualization.three_d_trajectory import plot_3d_trajectory
+
+                with st.spinner("Rendering 3D solar environment and orbital trajectory..."):
+                    fig_traj, is_impact = plot_3d_trajectory(raw, pred, filaments[traj_filament_index])
+                    st.plotly_chart(fig_traj, use_container_width=True)
+
+                if is_impact:
+                    st.error("**WARNING:** An eruption from this filament would likely hit Earth, potentially causing a geomagnetic storm.")
+                else:
+                    st.success("**SAFE:** An eruption from this filament is not Earth-directed.")
+            except Exception as e:
+                st.error("3D CME trajectory rendering failed.")
+                st.caption(f"Details: {e}")
             
             with st.expander("How is this calculated?"):
                 st.markdown("""
@@ -632,9 +653,13 @@ elif page == "Upload Image":
             for key in ("centroid", "bbox", "physical"):
                 csv_row[key] = json.dumps(csv_row[key])
 
-            phase3_metrics = di.render_phase3_sections(selected, analysis_mode, obs_time_str, historical_case)
-            if phase3_metrics:
-                csv_row.update(phase3_metrics)
+            try:
+                phase3_metrics = di.render_phase3_sections(selected, analysis_mode, obs_time_str, historical_case)
+                if phase3_metrics:
+                    csv_row.update(phase3_metrics)
+            except Exception as e:
+                st.error("Space weather (DONKI/CME propagation) sections failed to render.")
+                st.caption(f"Details: {e}")
 
             detail_csv = io.StringIO()
             csv_writer = csv.DictWriter(detail_csv, fieldnames=list(csv_row.keys()))

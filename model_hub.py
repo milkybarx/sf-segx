@@ -222,6 +222,21 @@ def get_model(arch: str):
     return _models[arch]
 
 
+def release_model(arch: str):
+    """Drop a loaded model from the in-memory cache and force garbage collection.
+
+    Used after ensemble inference (which loads every trained architecture at once)
+    to give the process's memory back -- important on memory-constrained hosts like
+    Streamlit Community Cloud's free tier, where holding 5+ model checkpoints
+    (including two ~270-375MB Mask2Former variants) in memory simultaneously and
+    indefinitely risks an out-of-memory kill that shows up to the user as a plain
+    app crash with no Python traceback."""
+    if arch in _models:
+        del _models[arch]
+    import gc
+    gc.collect()
+
+
 def get_ext_preprocessor():
     global _ext_preprocessor
     if _ext_preprocessor is None:
