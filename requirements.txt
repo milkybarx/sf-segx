@@ -35,5 +35,4 @@ plotly==6.3.0
 matplotlib==3.10.6
 scikit-learn
 joblib
-segment-anything
 streamlit-option-menu

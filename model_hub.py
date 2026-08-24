@@ -59,13 +59,6 @@ else:
     GALLERY_IMG_DIR, GALLERY_MASK_DIR = _BUNDLED_IMG_DIR, _BUNDLED_MASK_DIR
 
 EXTERNAL_MODELS = {
-    "medsam": {
-        "label": "MedSAM (ViT-B)",
-        "kind": "medsam",
-        "checkpoint": os.path.join(ROOT, "checkpoints", "medsam_clean_best.pth"),
-        "resolution": 1024,
-        "best_threshold": 0.5,
-    },
     "mask2former_phase2_hybrid": {
         "label": "Mask2Former (ResNet-34 backbone, dice+focal+boundary loss, 512px)",
         "kind": "mask2former",
@@ -205,15 +198,6 @@ def get_model(arch: str):
         try:
             if arch in EXTERNAL_MODELS:
                 kind = EXTERNAL_MODELS[arch]["kind"]
-                if kind == "medsam":
-                    from segment_anything import sam_model_registry, SamPredictor
-                    sam = sam_model_registry["vit_b"](checkpoint=ckpt)
-                    m = SamPredictor(sam)
-                    m.model.to(device)
-                    m.model.eval()
-                    _models[arch] = (m, mtime)
-                    return _models[arch]
-                
                 checkpoint = torch.load(ckpt, map_location=device, weights_only=False)
                 if kind == "segformer":
                     m = _build_segformer_model(EXTERNAL_MODELS[arch])
@@ -236,6 +220,21 @@ def get_model(arch: str):
         m.eval()
         _models[arch] = (m, mtime)
     return _models[arch]
+
+
+def release_model(arch: str):
+    """Drop a loaded model from the in-memory cache and force garbage collection.
+
+    Used after ensemble inference (which loads every trained architecture at once)
+    to give the process's memory back -- important on memory-constrained hosts like
+    Streamlit Community Cloud's free tier, where holding 5+ model checkpoints
+    (including two ~270-375MB Mask2Former variants) in memory simultaneously and
+    indefinitely risks an out-of-memory kill that shows up to the user as a plain
+    app crash with no Python traceback."""
+    if arch in _models:
+        del _models[arch]
+    import gc
+    gc.collect()
 
 
 def get_ext_preprocessor():
@@ -486,25 +485,7 @@ def run_inference(raw_img: np.ndarray, arch: str, best_thresh: float):
     every architecture below gets color support without being retrained itself."""
     raw_img = to_halpha_style(raw_img)
     model, _ = get_model(arch)
-    if arch in EXTERNAL_MODELS and EXTERNAL_MODELS[arch]["kind"] == "medsam":
-        _, disk_mask = preprocessor.preprocess(raw_img)
-        small = cv2.resize(raw_img, (DISPLAY_SIZE, DISPLAY_SIZE), interpolation=cv2.INTER_AREA)
-        disk_small = cv2.resize(disk_mask.astype(np.uint8), (DISPLAY_SIZE, DISPLAY_SIZE),
-                                 interpolation=cv2.INTER_NEAREST).astype(bool)
-        if model is None:
-            return small, disk_small, np.zeros((DISPLAY_SIZE, DISPLAY_SIZE), dtype=np.float32), \
-                np.zeros((DISPLAY_SIZE, DISPLAY_SIZE), dtype=np.uint8)
-                
-        model_in = cv2.cvtColor(raw_img, cv2.COLOR_GRAY2RGB)
-        model.set_image(model_in)
-        h_orig, w_orig = raw_img.shape[:2]
-        box = np.array([0, 0, w_orig, h_orig])
-        masks, _, _ = model.predict(box=box, multimask_output=False)
-        probs_native = masks[0].astype(np.float32)
-        probs_up = cv2.resize(probs_native, (DISPLAY_SIZE, DISPLAY_SIZE), interpolation=cv2.INTER_AREA)
-        probs = probs_up
-
-    elif arch in EXTERNAL_MODELS and EXTERNAL_MODELS[arch]["kind"] == "segformer":
+    if arch in EXTERNAL_MODELS and EXTERNAL_MODELS[arch]["kind"] == "segformer":
         spec = EXTERNAL_MODELS[arch]
         res = spec.get("resolution", DISPLAY_SIZE)
         # No astronomical preprocessing (see EXTERNAL_MODELS docstring) -- just resize.

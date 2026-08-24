@@ -573,12 +573,17 @@ elif page == "Upload Image":
         raw = hub.to_halpha_style(raw_color)
 
         from inference.phase2 import run_phase2_analysis
-        with st.spinner("Running segmentation and Phase 2 analysis..."):
-            phase2_result = run_phase2_analysis(
-                raw, image_id=file_name, model_name=arch,
-                threshold=phase2_threshold, explain=show_explainability,
-            )
-            
+        try:
+            with st.spinner("Running segmentation and Phase 2 analysis..."):
+                phase2_result = run_phase2_analysis(
+                    raw, image_id=file_name, model_name=arch,
+                    threshold=phase2_threshold, explain=show_explainability,
+                )
+        except Exception as e:
+            st.error(f"Segmentation failed for model '{arch}'. Try a different model or image.")
+            st.caption(f"Details: {e}")
+            st.stop()
+
         phase2_inference = phase2_result["inference"]
         small = phase2_inference.preprocessed
         probs = cv2.resize(phase2_inference.probability, (small.shape[1], small.shape[0]))
@@ -741,9 +746,27 @@ elif page == "Upload Image":
             )
             from analysis.flare_prediction import calculate_flare_probability
 
-            disk_center_x, disk_center_y = raw.shape[1] / 2.0, raw.shape[0] / 2.0
-            display_count = min(len(filaments), 4)
-            risk_cols = st.columns(display_count) if display_count > 0 else []
+            try:
+                display_count = min(len(filaments), 4)
+                risk_cols = st.columns(display_count) if display_count > 0 else []
+
+                for i, f in enumerate(filaments[:display_count]):
+                    risk = calculate_flare_probability(
+                        length_px=f.get('skeleton_length_px', 0.0),
+                        region_type=f.get('spatial_region', 'ARF')
+                    )
+
+                    risk_cols[i].metric(
+                        f"Filament #{f['filament_id']}",
+                        f"{risk:.1%}",
+                        delta="HIGH RISK" if risk > 0.5 else "LOW RISK",
+                        delta_color="inverse"
+                    )
+                if len(filaments) > 4:
+                    st.info(f"Showing risk for the top 4 filaments (out of {len(filaments)} detected).")
+            except Exception as e:
+                st.error("Flare risk prediction failed.")
+                st.caption(f"Details: {e}")
 
             for i, f in enumerate(filaments[:display_count]):
                 risk = calculate_flare_probability(
