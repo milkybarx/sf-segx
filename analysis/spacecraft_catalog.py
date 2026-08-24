@@ -103,26 +103,52 @@ class SpacecraftCatalog:
         ]
 
     def get_spacecraft_position(self, sat_id: str, timestamp: str = None) -> Dict[str, Any]:
-        """Get the heliocentric Stonyhurst position of a spacecraft in degrees and distance (AU).
+        """Get heliocentric Stonyhurst position of a spacecraft.
         
-        Priority:
-        A. NASA SSCWeb ephemeris (where supported - not fully implemented, mocked)
-        B. Another validated real ephemeris source
-        C. Existing static catalog approximation
-        D. UNKNOWN
+        For L1/halo-orbit missions we use well-known positions.
+        For Earth-orbiting assets (GEO/MEO/LEO) we place them at Earth's position
+        (lat≈0, lon≈0 in Stonyhurst) plus their *sub-satellite longitude offset*
+        so they spread around Earth rather than all stacking at (0,0).
         """
-        sat_id = sat_id.strip().upper()
-        # Default fallback
-        pos = {"latitude": 0.0, "longitude": 0.0, "distance_au": 1.0, "position_source": "STATIC_ORBIT_APPROXIMATION"}
-        
-        if sat_id == "PARKER_SP":
-            pos = {"latitude": 0.0, "longitude": -45.0, "distance_au": 0.25, "position_source": "STATIC_ORBIT_APPROXIMATION"}
-        elif sat_id == "SOLAR_ORB":
-            pos = {"latitude": 15.0, "longitude": 30.0, "distance_au": 0.7, "position_source": "STATIC_ORBIT_APPROXIMATION"}
-        elif sat_id == "SOHO":
-            pos = {"latitude": 0.0, "longitude": 0.0, "distance_au": 0.99, "position_source": "STATIC_ORBIT_APPROXIMATION"}
-            
-        return pos
+        sat_id_upper = sat_id.strip().upper()
+
+        # --- Known interplanetary missions with real positions ---
+        KNOWN = {
+            "PARKER_SP":  {"latitude": 0.0,  "longitude": -45.0, "distance_au": 0.25},
+            "PARKER SOLAR PROBE": {"latitude": 0.0, "longitude": -45.0, "distance_au": 0.25},
+            "SOLAR_ORB":  {"latitude": 15.0, "longitude":  30.0, "distance_au": 0.70},
+            "SOLAR ORBITER": {"latitude": 15.0, "longitude": 30.0, "distance_au": 0.70},
+            "SOHO":       {"latitude": 0.0,  "longitude":   0.0, "distance_au": 0.99},
+            "STEREO-A":   {"latitude": 0.0,  "longitude": -100.0,"distance_au": 1.00},
+            "STEREO-B":   {"latitude": 0.0,  "longitude":  130.0,"distance_au": 1.00},
+        }
+        if sat_id_upper in KNOWN:
+            pos = KNOWN[sat_id_upper].copy()
+            pos["position_source"] = "STATIC_ORBIT_APPROXIMATION"
+            return pos
+
+        # --- Earth-orbiting satellites: find their entry in catalog for longitude ---
+        sc_entry = next((s for s in self.spacecrafts
+                         if s["satellite_id"].strip().upper() == sat_id_upper), None)
+        if sc_entry:
+            orbit_type = sc_entry.get("orbit_type", "GEO")
+            sat_lon    = float(sc_entry.get("longitude", 0.0))
+            # In Stonyhurst coords Earth is at lon=0. A GEO satellite at -75° Earth-longitude
+            # is ~0° in heliocentric coords (it's glued to Earth), but we spread them slightly
+            # so the cone model can distinguish them. We map satellite geographic lon → a small
+            # heliocentric offset (±30° max) so they don't all land at exactly (0,0).
+            hc_lon_offset = (sat_lon / 180.0) * 30.0   # maps ±180° geo → ±30° helio
+            dist = {"GEO": 1.00, "MEO": 1.00, "LEO": 1.00, "L1_HALO": 0.99}.get(orbit_type, 1.00)
+            return {
+                "latitude": 0.0,
+                "longitude": round(hc_lon_offset, 2),
+                "distance_au": dist,
+                "position_source": "STATIC_ORBIT_APPROXIMATION",
+            }
+
+        # fallback
+        return {"latitude": 0.0, "longitude": 0.0, "distance_au": 1.0,
+                "position_source": "STATIC_ORBIT_APPROXIMATION"}
     def calculate_cme_exposure(self, sat_id: str, cme_lat: float, cme_lon: float,
                               cme_half_angle: float, cme_speed: float,
                               cme_start_time: str, nasa_model_impact: dict = None) -> Dict[str, Any]:

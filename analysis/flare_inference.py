@@ -20,8 +20,14 @@ class FlareRiskInference:
         
     def _load_models(self):
         if os.path.exists(MODEL_PATH) and os.path.exists(PREPROCESSOR_PATH):
-            self.model = joblib.load(MODEL_PATH)
-            self.preprocessor = joblib.load(PREPROCESSOR_PATH)
+            try:
+                self.model = joblib.load(MODEL_PATH)
+                self.preprocessor = joblib.load(PREPROCESSOR_PATH)
+            except Exception as e:
+                # Gracefully handle sklearn version mismatches (e.g. _fill_dtype, etc.)
+                print(f"[FlareRiskInference] Could not load Phase 2E models: {e}")
+                self.model = None
+                self.preprocessor = None
             
     def _compute_context(self, obs_time: datetime) -> Dict[str, Any]:
         """Fetch DONKI context strictly PRIOR to obs_time to match Phase 2E."""

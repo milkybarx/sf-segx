@@ -78,22 +78,23 @@ def selected_overlay(crop: np.ndarray, filament: Dict, labels: np.ndarray,
         heat = cv2.applyColorMap((np.clip(attribution[y0:y1, x0:x1], 0, 1) * 255).astype(np.uint8), cv2.COLORMAP_INFERNO)
         heat = cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
         display = cv2.addWeighted(display, 0.68, heat, 0.32, 0)
-    local = dict(filament)
     bbox = filament["bbox"]
-    x_min = bbox.get("x_min", bbox.get("x", 0))
-    y_min = bbox.get("y_min", bbox.get("y", 0))
-    x_max = bbox.get("x_max", x_min + bbox.get("width", 0))
-    y_max = bbox.get("y_max", y_min + bbox.get("height", 0))
-    
-    local["bbox"] = {"x_min": int(x_min) - x0, "y_min": int(y_min) - y0,
-                     "x_max": int(x_max) - x0, "y_max": int(y_max) - y0}
-    local["image_width"], local["image_height"] = display.shape[1], display.shape[0]
-    if filament.get("skeleton_mask") is not None:
-        local["skeleton_mask"] = filament["skeleton_mask"][y0:y1, x0:x1]
-    from visualization.phase2 import _instance_panel
-    if show_skeleton or show_bbox or show_labels:
-        display = _instance_panel(display, [local], skeleton=show_skeleton,
-                                   draw_boxes=show_bbox, draw_labels=show_labels)
+    x_min = int(bbox.get("x_min", bbox.get("x", 0))) - x0
+    y_min = int(bbox.get("y_min", bbox.get("y", 0))) - y0
+    x_max = int(bbox.get("x_max", x_min + bbox.get("width", 0))) - x0
+    y_max = int(bbox.get("y_max", y_min + bbox.get("height", 0))) - x0
+
+    x_min_cl, x_max_cl = np.clip([x_min, x_max], 0, display.shape[1] - 1)
+    y_min_cl, y_max_cl = np.clip([y_min, y_max], 0, display.shape[0] - 1)
+
+    if show_skeleton and filament.get("skeleton_mask") is not None:
+        sk_crop = filament["skeleton_mask"][y0:y1, x0:x1]
+        if sk_crop.shape[:2] == display.shape[:2]:
+            display[sk_crop > 0] = (0, 255, 255)  # cyan spine
+
+    if show_bbox:
+        cv2.rectangle(display, (x_min_cl, y_min_cl), (x_max_cl, y_max_cl), (0, 255, 0), 1)
+
     return display
 
 

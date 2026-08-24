@@ -46,18 +46,40 @@ def render_phase3_sections(selected_filament: dict, mode: str, obs_time_str: str
             score, status = inference.predict_risk(selected_filament, obs_time_str)
             
         if pd.isna(score):
-            st.error(f"Flare risk calculation failed: {status}")
-            risk_level = "UNKNOWN"
+            # Any failure (version mismatch, missing model, etc.) → fall back to 2-feature RF
+            # Phase 2E model incompatible with this sklearn version — use our 2-feature RF fallback
+            try:
+                from analysis.flare_prediction import calculate_flare_probability
+                _fb_risk = calculate_flare_probability(
+                    length_px=selected_filament.get("skeleton_length_px", 0.0),
+                    region_type=selected_filament.get("spatial_region", "ARF")
+                )
+                _fb_pct = _fb_risk * 100
+                if _fb_pct >= 60: risk_level = "HIGH"
+                elif _fb_pct >= 35: risk_level = "MODERATE"
+                else: risk_level = "LOW"
+                score_text = f"{_fb_pct:.1f}%"
+                col1, col2 = st.columns(2)
+                col1.metric("24h Eruption Risk", score_text, delta=None)
+                col2.metric("Risk Level", risk_level)
+                st.info(
+                    "ℹ️ Phase 2E contextual model unavailable (sklearn version mismatch). "
+                    "Showing simplified 2-feature RF score (filament length + region type).",
+                    icon=None
+                )
+            except Exception as fb_err:
+                st.warning(f"Flare risk model unavailable: {fb_err}")
+                risk_level = "UNKNOWN"
         else:
             if score >= 0.75: risk_level = "EXTREME"
             elif score >= 0.5: risk_level = "HIGH"
             elif score >= 0.25: risk_level = "MODERATE"
             else: risk_level = "LOW"
             
-            st.markdown(f"### Relative Flare Risk: **{risk_level}**")
-            st.markdown(f"**Score**: {score:.3f}")
-            st.markdown(f"**Status**: `{status}`")
-            st.caption("Uncalibrated model score used for relative ranking of flare risk.")
+            col1, col2 = st.columns(2)
+            col1.metric("Relative Risk Score", f"{score:.3f}")
+            col2.metric("Risk Level", risk_level)
+            st.caption("Phase 2E contextual RandomForest · UNCALIBRATED · for relative ranking only.")
 
     # 4. DONKI Event Chain
     st.divider()

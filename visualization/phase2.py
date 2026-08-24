@@ -119,10 +119,18 @@ def _instance_panel(image: np.ndarray, filaments: List[Dict], skeleton: bool = F
             cv2.rectangle(rgb, (int(x_min), int(y_min)), (int(x_max), int(y_max)), (0, 255, 0), 1)
         if not draw_labels:
             continue
-        label = f"#{filament['filament_id']} | {float(filament.get('confidence', 0.0)):.3f} | {filament.get('spatial_region', 'CENTER')}"
-        # At 200 DPI, 8 pt text is compact but remains sharp in the source-sized panel.
-        label_width = max(112, len(label) * 7.0)
-        label_height = 23
+
+        # Dynamically scale font size & label text for small crops vs full disk
+        is_crop = image_width < 500
+        if is_crop:
+            label = f"#{filament['filament_id']}"
+            scale_factor = max(0.35, image_width / 800.0)
+        else:
+            label = f"#{filament['filament_id']} | {float(filament.get('confidence', 0.0)):.3f} | {filament.get('spatial_region', 'CENTER')}"
+            scale_factor = 1.0
+
+        label_width = max(24.0 * scale_factor, len(label) * 7.0 * scale_factor)
+        label_height = max(10.0, 23.0 * scale_factor)
         label_rect, leader = _place_label(
             (0, 0, label_width, label_height),
             (x_min, y_min, x_max, y_max), placed_labels,
@@ -130,7 +138,7 @@ def _instance_panel(image: np.ndarray, filaments: List[Dict], skeleton: bool = F
             image_width, image_height,
         )
         placed_labels.append(label_rect)
-        label_specs.append((label_rect, label, (x_min, y_min, x_max, y_max), leader))
+        label_specs.append((label_rect, label, (x_min, y_min, x_max, y_max), leader, scale_factor))
 
     figure = plt.figure(figsize=(image_width / 200, image_height / 200), dpi=200)
     axis = figure.add_axes([0, 0, 1, 1])
@@ -138,17 +146,19 @@ def _instance_panel(image: np.ndarray, filaments: List[Dict], skeleton: bool = F
     axis.set_xlim(0, image_width)
     axis.set_ylim(image_height, 0)
     axis.axis("off")
-    for placed, text, filament_rect, leader in label_specs:
+    for placed, text, filament_rect, leader, sf in label_specs:
         if leader:
             label_center = ((placed[0] + placed[2]) / 2, (placed[1] + placed[3]) / 2)
             filament_center = ((filament_rect[0] + filament_rect[2]) / 2,
                                (filament_rect[1] + filament_rect[3]) / 2)
             axis.plot([label_center[0], filament_center[0]], [label_center[1], filament_center[1]],
-                      color="#f0f0f0", linewidth=0.7, zorder=4)
-        axis.text(placed[0] + 5, placed[1] + 15, text, color="#39ff14", fontsize=8,
+                      color="#f0f0f0", linewidth=0.7 * sf, zorder=4)
+        fs = max(3.5, min(8.0, 8.0 * sf))
+        pad = max(0.08, 0.18 * sf)
+        axis.text(placed[0] + 4 * sf, placed[1] + (placed[3] - placed[1]) / 2.0, text, color="#39ff14", fontsize=fs,
                   fontweight="bold", va="center", ha="left",
-                  bbox={"boxstyle": "round,pad=0.18", "facecolor": "#050805",
-                        "edgecolor": "#e5e5e5", "linewidth": 0.6, "alpha": 1.0})
+                  bbox={"boxstyle": f"round,pad={pad:.2f}", "facecolor": "#050805",
+                        "edgecolor": "#e5e5e5", "linewidth": max(0.3, 0.6 * sf), "alpha": 0.9})
     figure.canvas.draw()
     rendered = np.asarray(figure.canvas.buffer_rgba())[..., :3].copy()
     plt.close(figure)
