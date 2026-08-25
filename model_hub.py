@@ -59,46 +59,12 @@ else:
     GALLERY_IMG_DIR, GALLERY_MASK_DIR = _BUNDLED_IMG_DIR, _BUNDLED_MASK_DIR
 
 EXTERNAL_MODELS = {
-    "patch_refiner": {
-        "label": "Patch Refiner (Mask2Former)",
-        "kind": "mask2former",
-        "checkpoint": os.path.join(ROOT, "checkpoints", "patch_refiner_best_best_final.pth"),
-        "resolution": 512,
-        "best_threshold": 0.5,
-        "final_metrics": {
-            "epoch": 34, "total_epochs": 35,
-            "val_loss": 0.1850, "val_dice": 0.73037,
-            "val_iou": 0.58082, "val_precision": 0.68987,
-            "val_recall": 0.80372,
-        },
-    },
-    "mask2former_phase2_hybrid": {
-        "label": "Mask2Former Hybrid (ResNet-34)",
-        "kind": "mask2former",
-        "checkpoint": os.path.join(ROOT, "checkpoints", "mask2former_phase2_hybrid_512_best.pth"),
-        "resolution": 512,
-        "best_threshold": 0.5,
-        # Self-reported at training time (its own val split); independently re-measured
-        # via this repo's real inference pipeline on an 80-image sample of the gallery
-        # set and confirmed as a genuine improvement over mask2former_phase3_768
-        # (0.7173 vs 0.6919 real measured mean Dice) before being added here.
-        "final_metrics": {
-            "epoch": 49, "total_epochs": 50,
-            "val_loss": 0.19984761522761707, "val_dice": 0.7248574258952305,
-            "val_iou": 0.5722777781815365, "val_precision": 0.7237881098327965,
-            "val_recall": 0.7350614394607216,
-        },
-    },
     "mask2former_phase3": {
-        "label": "Mask2Former Phase 3 (768px)",
+        "label": "Mask2Former (768px Transformer)",
         "kind": "mask2former",
         "checkpoint": os.path.join(ROOT, "checkpoints", "mask2former_phase3_768_best.pth"),
-        # Native training/inference resolution -- resized up from the 512 used elsewhere
-        # in this dashboard, then back down to DISPLAY_SIZE for consistent UI display.
         "resolution": 768,
         "best_threshold": 0.5,
-        # No per-epoch history was kept for this checkpoint, only its final (best) epoch --
-        # shown as a metrics summary instead of a Dice-over-epochs chart.
         "final_metrics": {
             "epoch": 50, "total_epochs": 50,
             "val_loss": 0.21066286736007395, "val_dice": 0.7206500790499407,
