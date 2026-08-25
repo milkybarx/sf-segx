@@ -60,7 +60,7 @@ else:
 
 EXTERNAL_MODELS = {
     "patch_refiner": {
-        "label": "Patch Refiner (Mask2Former ResNet-34, 512px - Val Dice 0.730)",
+        "label": "Patch Refiner (Mask2Former)",
         "kind": "mask2former",
         "checkpoint": os.path.join(ROOT, "checkpoints", "patch_refiner_best_best_final.pth"),
         "resolution": 512,
@@ -73,7 +73,7 @@ EXTERNAL_MODELS = {
         },
     },
     "mask2former_phase2_hybrid": {
-        "label": "Mask2Former (ResNet-34 backbone, dice+focal+boundary loss, 512px)",
+        "label": "Mask2Former Hybrid (ResNet-34)",
         "kind": "mask2former",
         "checkpoint": os.path.join(ROOT, "checkpoints", "mask2former_phase2_hybrid_512_best.pth"),
         "resolution": 512,
@@ -90,7 +90,7 @@ EXTERNAL_MODELS = {
         },
     },
     "mask2former_phase3": {
-        "label": "Mask2Former (ResNet-34 backbone, 768px)",
+        "label": "Mask2Former Phase 3 (768px)",
         "kind": "mask2former",
         "checkpoint": os.path.join(ROOT, "checkpoints", "mask2former_phase3_768_best.pth"),
         # Native training/inference resolution -- resized up from the 512 used elsewhere

@@ -339,7 +339,15 @@ def cached_status(arch):
 
 def model_options():
     models = cached_model_list()
-    labels = {m["arch"]: f"{m['label']}" + (f"  |  Val Dice: {m['best_val_dice']:.3f}" if m["best_val_dice"] else "  |  Untrained") for m in models}
+    # Sort models by highest validation Dice score first so the best model is selected by default
+    models = sorted(models, key=lambda m: m.get("best_val_dice") or 0.0, reverse=True)
+    labels = {}
+    for m in models:
+        dice = m.get("best_val_dice")
+        dice_str = f"Val Dice: {dice:.3f}" if dice else "Untrained"
+        is_top = (m == models[0] and dice is not None)
+        badge = "  (BEST)" if is_top else ""
+        labels[m["arch"]] = f"{m['label']} | {dice_str}{badge}"
     return models, labels
 
 
