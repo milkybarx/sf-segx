@@ -257,22 +257,35 @@ def png_bytes(image: np.ndarray) -> bytes:
 
 def morphology_table_rows(filaments):
     """Return Arrow-compatible scalar rows without internal NumPy masks."""
+    from analysis.flare_prediction import calculate_flare_probability
     rows = []
     for filament in filaments:
         centroid = filament.get("centroid", {})
+        length_px = float(filament.get("skeleton_length_px", 0.0))
+        region = filament.get("spatial_region", "CENTER")
+        risk_prob = calculate_flare_probability(length_px=length_px, region_type=region)
+
+        if risk_prob >= 0.60:
+            risk_label = "HIGH"
+        elif risk_prob >= 0.40:
+            risk_label = "MODERATE"
+        else:
+            risk_label = "LOW"
+
         rows.append({
             "Filament ID": filament.get("filament_id", 0),
             "Confidence": round(float(filament.get("confidence", 0.0)), 3),
             "Area (px)": round(float(filament.get("area_px", 0.0)), 2),
             "Perimeter (px)": round(float(filament.get("perimeter_px", 0.0)), 2),
-            "Skeleton length (px)": round(float(filament.get("skeleton_length_px", 0.0)), 2),
+            "Skeleton length (px)": round(length_px, 2),
             "Average width (px)": round(float(filament.get("avg_width_px", 0.0)), 2),
             "Sinuosity": round(float(filament.get("sinuosity", 1.0)), 3),
             "Orientation (deg)": round(float(filament.get("orientation_deg", 0.0)), 2),
             "Centroid X": round(float(centroid.get("x", 0.0)), 2),
             "Centroid Y": round(float(centroid.get("y", 0.0)), 2),
-            "Spatial region": filament.get("spatial_region", "CENTER"),
-            "Risk indicator": filament.get("risk_screening_indicator", "LOW"),
+            "Spatial region": region,
+            "24h Flare Risk": f"{risk_prob:.1%}",
+            "Risk indicator": risk_label,
         })
     return rows
 
@@ -756,32 +769,27 @@ elif page == "Upload Image":
                         region_type=f.get('spatial_region', 'ARF')
                     )
 
+                    if risk >= 0.60:
+                        risk_tag = "HIGH RISK"
+                        d_color = "inverse"
+                    elif risk >= 0.40:
+                        risk_tag = "MODERATE RISK"
+                        d_color = "off"
+                    else:
+                        risk_tag = "LOW RISK"
+                        d_color = "normal"
+
                     risk_cols[i].metric(
                         f"Filament #{f['filament_id']}",
                         f"{risk:.1%}",
-                        delta="HIGH RISK" if risk > 0.5 else "LOW RISK",
-                        delta_color="inverse"
+                        delta=risk_tag,
+                        delta_color=d_color
                     )
                 if len(filaments) > 4:
                     st.info(f"Showing risk for the top 4 filaments (out of {len(filaments)} detected).")
             except Exception as e:
                 st.error("Flare risk prediction failed.")
                 st.caption(f"Details: {e}")
-
-            for i, f in enumerate(filaments[:display_count]):
-                risk = calculate_flare_probability(
-                    length_px=f.get('skeleton_length_px', 0.0),
-                    region_type=f.get('spatial_region', 'ARF')
-                )
-                
-                risk_cols[i].metric(
-                    f"Filament #{f['filament_id']}", 
-                    f"{risk:.1%}", 
-                    delta="HIGH RISK" if risk > 0.5 else "LOW RISK",
-                    delta_color="inverse"
-                )
-            if len(filaments) > 4:
-                st.info(f"Showing risk for top 4 filaments out of {len(filaments)} detected.")
             
             st.divider()
             st.markdown('<div class="viz-section-header">3D HELIOSPHERIC CME TRAJECTORY &amp; DRAG MODEL</div>', unsafe_allow_html=True)
