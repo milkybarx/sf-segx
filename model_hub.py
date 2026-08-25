@@ -59,6 +59,19 @@ else:
     GALLERY_IMG_DIR, GALLERY_MASK_DIR = _BUNDLED_IMG_DIR, _BUNDLED_MASK_DIR
 
 EXTERNAL_MODELS = {
+    "patch_refiner": {
+        "label": "Patch Refiner (Mask2Former ResNet-34, 512px - Val Dice 0.730)",
+        "kind": "mask2former",
+        "checkpoint": os.path.join(ROOT, "checkpoints", "patch_refiner_best_best_final.pth"),
+        "resolution": 512,
+        "best_threshold": 0.5,
+        "final_metrics": {
+            "epoch": 34, "total_epochs": 35,
+            "val_loss": 0.1850, "val_dice": 0.73037,
+            "val_iou": 0.58082, "val_precision": 0.68987,
+            "val_recall": 0.80372,
+        },
+    },
     "mask2former_phase2_hybrid": {
         "label": "Mask2Former (ResNet-34 backbone, dice+focal+boundary loss, 512px)",
         "kind": "mask2former",
