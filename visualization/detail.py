@@ -60,7 +60,11 @@ def super_resolve_crop(crop: np.ndarray, method: str = "Lanczos (Current)", scal
             if sr_np.ndim == 3:
                 sr_np = sr_np.transpose(1, 2, 0)
 
-            return (sr_np * 255.0).clip(0, 255).astype(np.uint8)
+            res = (sr_np * 255.0).clip(0, 255).astype(np.uint8)
+            # Safeguard: if untrained AI weights produce an abnormally dark image, fallback to high-quality Lanczos interpolation
+            if crop.mean() > 20.0 and res.mean() < 0.4 * crop.mean():
+                return cv2.resize(crop, (crop.shape[1] * scale, crop.shape[0] * scale), interpolation=cv2.INTER_LANCZOS4)
+            return res
 
     # Fallback to Lanczos if AI model is not provided
     return cv2.resize(crop, (crop.shape[1] * scale, crop.shape[0] * scale), interpolation=cv2.INTER_LANCZOS4)
