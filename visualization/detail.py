@@ -10,16 +10,26 @@ def crop_filament(image: np.ndarray, filament: Dict, padding: int = 30):
     """Crop the original image around one existing filament bounding box."""
     if padding < 0:
         raise ValueError("padding must be non-negative")
-    bbox = filament["bbox"]
-    x_min = bbox.get("x_min", bbox.get("x", 0))
-    y_min = bbox.get("y_min", bbox.get("y", 0))
-    x_max = bbox.get("x_max", x_min + bbox.get("width", 0))
-    y_max = bbox.get("y_max", y_min + bbox.get("height", 0))
-    
-    x0 = max(0, int(x_min) - padding)
-    y0 = max(0, int(y_min) - padding)
-    x1 = min(image.shape[1], int(x_max) + padding)
-    y1 = min(image.shape[0], int(y_max) + padding)
+
+    mask_to_check = filament.get("component_mask")
+    if mask_to_check is None:
+        mask_to_check = filament.get("skeleton_mask")
+
+    if mask_to_check is not None and np.any(mask_to_check > 0):
+        ys, xs = np.where(mask_to_check > 0)
+        x_min, x_max = int(xs.min()), int(xs.max())
+        y_min, y_max = int(ys.min()), int(ys.max())
+    else:
+        bbox = filament["bbox"]
+        x_min = int(bbox.get("x_min", bbox.get("x", 0)))
+        y_min = int(bbox.get("y_min", bbox.get("y", 0)))
+        x_max = int(bbox.get("x_max", x_min + bbox.get("width", 0)))
+        y_max = int(bbox.get("y_max", y_min + bbox.get("height", 0)))
+
+    x0 = max(0, x_min - padding)
+    y0 = max(0, y_min - padding)
+    x1 = min(image.shape[1], x_max + padding)
+    y1 = min(image.shape[0], y_max + padding)
     return image[y0:y1, x0:x1].copy(), (x0, y0, x1, y1)
 
 
@@ -30,11 +40,11 @@ def super_resolve_crop(crop: np.ndarray, method: str = "Lanczos (Current)", scal
         raise ValueError("scale must be positive")
     if scale == 1 or method == "OFF":
         return crop.copy()
-    
+
     if method in ["Lanczos (Current)", "Bicubic"]:
         interp = cv2.INTER_LANCZOS4 if method == "Lanczos (Current)" else cv2.INTER_CUBIC
         return cv2.resize(crop, (crop.shape[1] * scale, crop.shape[0] * scale), interpolation=interp)
-    
+
     if model is not None:
         import torch
         with torch.inference_mode():
@@ -43,15 +53,15 @@ def super_resolve_crop(crop: np.ndarray, method: str = "Lanczos (Current)", scal
                 lr_tensor = torch.from_numpy(lr_float).unsqueeze(0).unsqueeze(0).to(device)
             else:
                 lr_tensor = torch.from_numpy(lr_float).permute(2, 0, 1).unsqueeze(0).to(device)
-                
+
             sr_tensor = model(lr_tensor)
             sr_np = sr_tensor.squeeze().cpu().numpy()
-            
+
             if sr_np.ndim == 3:
                 sr_np = sr_np.transpose(1, 2, 0)
-            
+
             return (sr_np * 255.0).clip(0, 255).astype(np.uint8)
-            
+
     # Fallback to Lanczos if AI model is not provided
     return cv2.resize(crop, (crop.shape[1] * scale, crop.shape[0] * scale), interpolation=cv2.INTER_LANCZOS4)
 
@@ -66,31 +76,22 @@ def selected_overlay(crop: np.ndarray, filament: Dict, labels: np.ndarray,
     x0, y0, x1, y1 = crop_bounds
     display = cv2.cvtColor(crop, cv2.COLOR_GRAY2RGB)
     component = (labels[y0:y1, x0:x1] == filament.get("component_id", -1))
+    if not np.any(component) and filament.get("component_mask") is not None:
+        component = (filament["component_mask"][y0:y1, x0:x1] > 0)
+
     if show_mask:
         color = np.zeros_like(display)
         color[component] = (235, 45, 65)
         display = cv2.addWeighted(display, 0.72, color, 0.28, 0)
         contours, _ = cv2.findContours(component.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(display, contours, -1, (255, 190, 0), 1)
+
     if show_attribution and attribution is not None:
         if attribution.shape[:2] != labels.shape[:2]:
             attribution = cv2.resize(attribution, (labels.shape[1], labels.shape[0]), interpolation=cv2.INTER_LINEAR)
         heat = cv2.applyColorMap((np.clip(attribution[y0:y1, x0:x1], 0, 1) * 255).astype(np.uint8), cv2.COLORMAP_INFERNO)
         heat = cv2.cvtColor(heat, cv2.COLOR_BGR2RGB)
         display = cv2.addWeighted(display, 0.68, heat, 0.32, 0)
-    bbox = filament["bbox"]
-    x_min_abs = int(bbox.get("x_min", bbox.get("x", 0)))
-    y_min_abs = int(bbox.get("y_min", bbox.get("y", 0)))
-    x_max_abs = int(bbox.get("x_max", x_min_abs + bbox.get("width", 0)))
-    y_max_abs = int(bbox.get("y_max", y_min_abs + bbox.get("height", 0)))
-
-    x_min_rel = x_min_abs - x0
-    y_min_rel = y_min_abs - y0
-    x_max_rel = x_max_abs - x0
-    y_max_rel = y_max_abs - y0
-
-    x_min_cl, x_max_cl = np.clip([x_min_rel, x_max_rel], 0, display.shape[1] - 1)
-    y_min_cl, y_max_cl = np.clip([y_min_rel, y_max_rel], 0, display.shape[0] - 1)
 
     if show_skeleton and filament.get("skeleton_mask") is not None:
         sk_crop = filament["skeleton_mask"][y0:y1, x0:x1]
@@ -98,7 +99,26 @@ def selected_overlay(crop: np.ndarray, filament: Dict, labels: np.ndarray,
             display[sk_crop > 0] = (0, 255, 255)  # cyan spine
 
     if show_bbox:
-        cv2.rectangle(display, (x_min_cl, y_min_cl), (x_max_cl, y_max_cl), (0, 255, 0), 1)
+        ys, xs = np.where(component)
+        if len(xs) == 0 or len(ys) == 0:
+            if filament.get("skeleton_mask") is not None:
+                sk_c = filament["skeleton_mask"][y0:y1, x0:x1]
+                ys, xs = np.where(sk_c > 0)
+
+        if len(xs) > 0 and len(ys) > 0:
+            bx_min, bx_max = int(xs.min()), int(xs.max())
+            by_min, by_max = int(ys.min()), int(ys.max())
+            cv2.rectangle(display, (bx_min, by_min), (bx_max, by_max), (0, 255, 0), 1)
+        else:
+            bbox = filament["bbox"]
+            x_min_abs = int(bbox.get("x_min", bbox.get("x", 0)))
+            y_min_abs = int(bbox.get("y_min", bbox.get("y", 0)))
+            x_max_abs = int(bbox.get("x_max", x_min_abs + bbox.get("width", 0)))
+            y_max_abs = int(bbox.get("y_max", y_min_abs + bbox.get("height", 0)))
+
+            x_min_cl, x_max_cl = np.clip([x_min_abs - x0, x_max_abs - x0], 0, display.shape[1] - 1)
+            y_min_cl, y_max_cl = np.clip([y_min_abs - y0, y_max_abs - y0], 0, display.shape[0] - 1)
+            cv2.rectangle(display, (x_min_cl, y_min_cl), (x_max_cl, y_max_cl), (0, 255, 0), 1)
 
     return display
 
