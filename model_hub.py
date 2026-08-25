@@ -59,6 +59,19 @@ else:
     GALLERY_IMG_DIR, GALLERY_MASK_DIR = _BUNDLED_IMG_DIR, _BUNDLED_MASK_DIR
 
 EXTERNAL_MODELS = {
+    "patch_refiner": {
+        "label": "Patch Refiner (Mask2Former)",
+        "kind": "mask2former",
+        "checkpoint": os.path.join(ROOT, "checkpoints", "patch_refiner_best_best_final.pth"),
+        "resolution": 512,
+        "best_threshold": 0.5,
+        "final_metrics": {
+            "epoch": 34, "total_epochs": 35,
+            "val_loss": 0.1850, "val_dice": 0.73037,
+            "val_iou": 0.58082, "val_precision": 0.68987,
+            "val_recall": 0.80372,
+        },
+    },
     "mask2former_phase3": {
         "label": "Mask2Former (768px Transformer)",
         "kind": "mask2former",
@@ -509,7 +522,20 @@ def run_inference(raw_img: np.ndarray, arch: str, best_thresh: float):
             # own trained resolution (not from the already-downsampled "small") for best accuracy.
             model_in = cv2.resize(result["preprocessed"], (res, res), interpolation=cv2.INTER_AREA)
             inp = torch.from_numpy(model_in.astype(np.float32) / 255.0).unsqueeze(0).unsqueeze(0)
-            probs_native = torch.sigmoid(model(inp))
+            logits_tensor = model(inp)
+
+            if arch == "patch_refiner":
+                l_np = logits_tensor.squeeze().cpu().numpy()
+                disk_res = cv2.resize(result["disk_mask"].astype(np.uint8), (res, res), interpolation=cv2.INTER_NEAREST) > 127
+                disk_logits = l_np[disk_res]
+                bg_l, std_l = disk_logits.mean(), max(float(disk_logits.std()), 1e-4)
+                l_calib = (l_np - bg_l) / std_l
+                # Map z-scores (> 1.8 std) into high confidence probabilities (> 0.5)
+                probs_np = 1.0 / (1.0 + np.exp(-(l_calib - 1.8) * 1.5))
+                probs_native = torch.from_numpy(probs_np).unsqueeze(0).unsqueeze(0)
+            else:
+                probs_native = torch.sigmoid(logits_tensor)
+
             if res != DISPLAY_SIZE:
                 probs_native = torch.nn.functional.interpolate(
                     probs_native, size=(DISPLAY_SIZE, DISPLAY_SIZE), mode="bilinear", align_corners=False
